@@ -1,0 +1,32 @@
+# Local application database for the NGWH web app.
+#
+# Sanity remains the CMS for editorial content (news, gallery, about, partners).
+# This database holds only transactional/application data: clubs, club
+# registrations, seasons and matches.
+#
+#   docker compose up -d
+#   cd web && npm run db:migrate
+#
+# Credentials come from web/.env.local (git-ignored). Port 5433 is used because
+# 5432 is commonly already taken by another local Postgres.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ngwh-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ngwh}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your shell or .env}
+      POSTGRES_DB: ${POSTGRES_DB:-ngwh}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - ngwh-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ngwh} -d ${POSTGRES_DB:-ngwh}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ngwh-pgdata:
