@@ -1,0 +1,395 @@
+@import "tailwindcss";
+
+/*
+ * NGWH design tokens. See .ai/DESIGN_SYSTEM.md for the reasoning.
+ *
+ * Neutrals are warm-biased (derived from hardwood and painted court lines) so
+ * they read as chosen rather than inherited. Semantic colour is a separate set
+ * from the accent: `--live` means a match is in progress and nothing else, and
+ * `--danger` is orange-biased so a destructive action never reads as brand
+ * crimson.
+ *
+ * Every token is declared here on bare `:root` first; the dark blocks below
+ * only redefine values. Components must style through tokens, never inside a
+ * media or [data-theme] block.
+ */
+:root {
+  /* ---- Brand -------------------------------------------------------- */
+  --crimson: #9e0e33;
+  --crimson-deep: #74091f;
+  --crimson-tint: #f7e8ec;
+  --gold: #e0a011;
+  /* Deep enough for 11px uppercase eyebrows to clear AA on the warm band. */
+  --gold-deep: #855c07;
+  --gold-tint: #fdf3dc;
+
+  /* ---- Neutrals (warm bias) ----------------------------------------- */
+  --court: #0e0c0b;
+  --court-raised: #1c1817;
+  --chalk: #fbf9f7;
+  --hardwood: #f1eae3;
+  --hardwood-deep: #e4dad0;
+  --slate: #6b625c;
+
+  /* ---- Semantic roles ----------------------------------------------- */
+  --background: var(--chalk);
+  --foreground: #17130f;
+  --surface: #ffffff;
+  --surface-sunken: var(--hardwood);
+  --surface-strong: var(--hardwood-deep);
+  --border: #e3d9cf;
+  --border-strong: #cfc2b5;
+  --muted: var(--slate);
+
+  --brand: var(--crimson);
+  --brand-strong: var(--crimson-deep);
+  --brand-tint: var(--crimson-tint);
+  --brand-contrast: #ffffff;
+  --accent: var(--gold);
+  --accent-strong: var(--gold-deep);
+  --accent-tint: var(--gold-tint);
+  --accent-contrast: #2a1c00;
+
+  --ink: var(--court);
+  --ink-raised: var(--court-raised);
+  --ink-foreground: #f6f2ee;
+  --ink-muted: #a89e95;
+  --ink-border: #322b28;
+
+  /*
+   * Status colour has two roles and therefore two tokens each.
+   *
+   *  - the bare token is a FILL, always paired with white text, so it stays
+   *    the same in both themes (a red badge is red);
+   *  - the `-text` token is for the colour used AS text on a page surface, and
+   *    that one has to lift in dark mode to stay legible.
+   *
+   * Collapsing these into one token is what made white-on-badge fail in dark
+   * mode while brand links failed in light. `--live` is reserved for
+   * in-progress matches and nothing else.
+   */
+  --live: #e11d2e;
+  --success: #167c4a;
+  --warning: #9a6400;
+  --danger: #b4471c;
+
+  --live-text: #c8102a;
+  --success-text: #167c4a;
+  --warning-text: #855201;
+  --danger-text: #a83f18;
+
+  /* Brand and accent as text, same reasoning as above. */
+  --brand-text: var(--crimson);
+  --accent-on-tint: #2a1c00;
+
+  /* ---- Type --------------------------------------------------------- */
+  --font-display: var(--font-archivo), "Archivo", system-ui, sans-serif;
+  --font-sans: var(--font-be-vietnam), "Be Vietnam Pro", system-ui, sans-serif;
+
+  --text-eyebrow: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.25rem;
+  --text-4xl: 3rem;
+  /* Fluid only where it earns it: the hero headline. */
+  --text-hero: clamp(2.25rem, 6vw, 4.5rem);
+
+  --tracking-eyebrow: 0.12em;
+  --tracking-display: -0.022em;
+
+  /* ---- Spacing (4px base) ------------------------------------------- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-8: 3rem;
+  --space-10: 4rem;
+  --space-12: 6rem;
+
+  /* ---- Radius: consistent, app-like hierarchy ----------------------- */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-pill: 9999px;
+
+  /* ---- Elevation: subtle, layered, ambient -------------------------- */
+  --shadow-xs: 0 1px 2px rgb(23 19 15 / 0.04);
+  --shadow-sm: 0 1px 3px rgb(23 19 15 / 0.05), 0 1px 2px rgb(23 19 15 / 0.03);
+  --shadow-md: 0 4px 12px -2px rgb(23 19 15 / 0.06), 0 2px 6px -1px rgb(23 19 15 / 0.04);
+  --shadow-raised: 0 4px 16px -4px rgb(23 19 15 / 0.08), 0 2px 6px -1px rgb(23 19 15 / 0.04);
+  --shadow-overlay: 0 20px 48px -12px rgb(14 12 11 / 0.35);
+
+  /* ---- Motion ------------------------------------------------------- */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --ease: cubic-bezier(0.2, 0.6, 0.35, 1);
+}
+
+/* Dark: only token values change. Guarded so an explicit light choice wins. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: #100e0d;
+    --foreground: #f4efea;
+    --surface: #191514;
+    --surface-sunken: #201b19;
+    --surface-strong: #2b2422;
+    --border: #302825;
+    --border-strong: #443a35;
+    --muted: #a9a09a;
+
+    --brand: #d4204b;
+    --brand-strong: #9e0e33;
+    --brand-tint: #2a1017;
+    --brand-text: #ef6a8c;
+    --accent: #f0b32a;
+    --accent-strong: #f0b32a;
+    --accent-tint: #2b2110;
+    --accent-on-tint: #f0b32a;
+
+    --ink: #070606;
+    --ink-raised: #171413;
+    --ink-border: #2a2422;
+
+    /* Fills unchanged — white still has to read on them. Text roles lift. */
+    --live-text: #ff6b77;
+    --success-text: #35a06a;
+    --warning-text: #c48711;
+    /* Shadows in dark context */
+    --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.2);
+    --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.25), 0 1px 2px rgb(0 0 0 / 0.15);
+    --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.3), 0 2px 6px -1px rgb(0 0 0 / 0.2);
+    --shadow-raised: 0 4px 16px -4px rgb(0 0 0 / 0.35), 0 2px 6px -1px rgb(0 0 0 / 0.2);
+    --shadow-overlay: 0 20px 48px -12px rgb(0 0 0 / 0.6);
+  }
+}
+
+:root[data-theme="dark"] {
+  --background: #100e0d;
+  --foreground: #f4efea;
+  --surface: #191514;
+  --surface-sunken: #201b19;
+  --surface-strong: #2b2422;
+  --border: #302825;
+  --border-strong: #443a35;
+  --muted: #a9a09a;
+
+  --brand: #d4204b;
+  --brand-strong: #9e0e33;
+  --brand-tint: #2a1017;
+  --brand-text: #ef6a8c;
+  --accent: #f0b32a;
+  --accent-strong: #f0b32a;
+  --accent-tint: #2b2110;
+  --accent-on-tint: #f0b32a;
+
+  --ink: #070606;
+  --ink-raised: #171413;
+  --ink-border: #2a2422;
+
+  /* Fills unchanged — white still has to read on them. Text roles lift. */
+  --live-text: #ff6b77;
+  --success-text: #35a06a;
+  --warning-text: #c48711;
+  --danger-text: #d9663a;
+
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.4), 0 1px 2px rgb(0 0 0 / 0.25);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.45), 0 2px 6px -1px rgb(0 0 0 / 0.3);
+  --shadow-raised: 0 8px 24px -6px rgb(0 0 0 / 0.5), 0 4px 12px -2px rgb(0 0 0 / 0.35);
+  --shadow-overlay: 0 20px 48px -12px rgb(0 0 0 / 0.7);
+}
+
+/* Expose tokens to Tailwind utilities (bg-brand, text-muted, gap-5, …). */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-strong: var(--surface-strong);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-muted: var(--muted);
+
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-tint: var(--brand-tint);
+  --color-brand-contrast: var(--brand-contrast);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-tint: var(--accent-tint);
+  --color-accent-contrast: var(--accent-contrast);
+
+  --color-ink: var(--ink);
+  --color-ink-raised: var(--ink-raised);
+  --color-ink-foreground: var(--ink-foreground);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-border: var(--ink-border);
+
+  --color-live: var(--live);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+
+  --color-live-text: var(--live-text);
+  --color-success-text: var(--success-text);
+  --color-warning-text: var(--warning-text);
+  --color-danger-text: var(--danger-text);
+  --color-brand-text: var(--brand-text);
+  --color-accent-on-tint: var(--accent-on-tint);
+
+  --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
+
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+  --radius-pill: var(--radius-pill);
+
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-raised: var(--shadow-raised);
+  --shadow-overlay: var(--shadow-overlay);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv05" 1;
+}
+
+/* Display face carries the voice: tight tracking, aligned digits. */
+.font-display,
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  letter-spacing: var(--tracking-display);
+  font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  text-wrap: balance;
+}
+
+/* Uppercase label used above section headings and on metadata. */
+.eyebrow {
+  font-family: var(--font-display);
+  font-size: var(--text-eyebrow);
+  font-weight: 700;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+/* Scores, standings and stat figures. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/*
+ * Visible keyboard focus everywhere. Several interactive elements are links
+ * styled as buttons, so this is set globally rather than per component.
+ */
+*:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+}
+
+/*
+ * Dark-ground context. The deep gold that reads as premium on paper goes muddy
+ * on near-black, so the accent is lifted here — and the crimson focus ring
+ * would disappear entirely, so it becomes gold too.
+ */
+.on-court {
+  --accent: #f5bd35;
+  --accent-strong: #f5bd35;
+  --accent-contrast: #2a1c00;
+  --accent-on-tint: #f5bd35;
+  --brand-text: #ff7d9c;
+  --live-text: #ff6b77;
+}
+.on-court *:focus-visible {
+  outline-color: var(--accent);
+}
+
+/* Skip link: off-screen until focused. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+}
+.skip-link:focus {
+  left: var(--space-2);
+  top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--brand);
+  color: var(--brand-contrast);
+  border-radius: var(--radius-md);
+  font-weight: 600;
+}
+
+/*
+ * Horizontal scroll affordance for wide tables: a soft edge that only appears
+ * while there is more content to the right, so the user can tell the table
+ * scrolls without a separate hint.
+ */
+.table-scroll {
+  overflow-x: auto;
+  background:
+    linear-gradient(to right, var(--surface) 30%, transparent) left center / 3rem 100% no-repeat,
+    linear-gradient(to left, var(--surface) 30%, transparent) right center / 3rem 100% no-repeat,
+    radial-gradient(farthest-side at 0 50%, rgb(23 19 15 / 0.12), transparent) left center / 1rem 100% no-repeat,
+    radial-gradient(farthest-side at 100% 50%, rgb(23 19 15 / 0.12), transparent) right center / 1rem 100% no-repeat;
+  background-attachment: local, local, scroll, scroll;
+}
+
+/* The live-status dot. Reduced to a static dot under reduced-motion below. */
+@keyframes ngwh-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+.live-dot {
+  animation: ngwh-pulse 1.6s var(--ease) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
