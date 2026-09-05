@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { getLocale, getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { AdminPageHeader } from "@/components/admin/AdminShell";
 import { JsonForm } from "@/components/admin/JsonForm";
@@ -10,10 +11,17 @@ import { listClubs } from "@/server/repositories/clubs";
 import { findMatchById } from "@/server/repositories/matches";
 import { listMatchStats } from "@/server/repositories/stats";
 
-export const metadata: Metadata = {
-  title: "Match statistics",
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const [metaT, t] = await Promise.all([
+    getTranslations("admin.meta"),
+    getTranslations("admin.matchDetail"),
+  ]);
+  return {
+    title: metaT("matchDetail"),
+    description: t("metaDescription"),
+    robots: { index: false, follow: false },
+  };
+}
 
 /**
  * Per-match statistics entry (REQ-TOURN-003).
@@ -25,6 +33,11 @@ export const metadata: Metadata = {
 export default async function AdminMatchDetailPage({
   params,
 }: PageProps<"/admin/matches/[id]">) {
+  const [t, metaT, locale] = await Promise.all([
+    getTranslations("admin.matchDetail"),
+    getTranslations("admin.meta"),
+    getLocale(),
+  ]);
   const { id } = await params;
   const matchId = Number.parseInt(id, 10);
   if (!Number.isInteger(matchId) || matchId < 1) notFound();
@@ -40,8 +53,8 @@ export default async function AdminMatchDetailPage({
     console.error("admin match detail", error);
     return (
       <>
-        <AdminPageHeader title="Match statistics" />
-        <ErrorState title="Database unavailable" />
+        <AdminPageHeader title={metaT("matchDetail")} />
+        <ErrorState title={t("databaseUnavailable")} />
       </>
     );
   }
@@ -64,11 +77,13 @@ export default async function AdminMatchDetailPage({
   return (
     <>
       <AdminPageHeader
-        title={`${match.home_team_name} vs ${match.away_team_name}`}
-        description={`${match.season_name_en} — statistics are limited to points and assists (REQ-TOURN-003; OQ-008 open).`}
+        title={t("matchTitle", { home: match.home_team_name, away: match.away_team_name })}
+        description={t("description", {
+          season: locale === "vi" ? match.season_name_vi : match.season_name_en,
+        })}
         action={
           <Link href="/admin/matches" className="text-[length:var(--text-sm)] font-semibold text-brand-text-text hover:underline">
-            ← All matches
+            ← {t("allMatches")}
           </Link>
         }
       />
@@ -79,39 +94,39 @@ export default async function AdminMatchDetailPage({
 
       <Card className="mb-6 p-4">
         <h2 className="eyebrow mb-3 text-muted">
-          Add a stat line
+          {t("addStatLine")}
         </h2>
         <JsonForm
           action={`/api/admin/matches/${match.id}/stats`}
-          submitLabel="Add"
+          submitLabel={t("add")}
           compact
           fields={[
-            { name: "playerName", label: "Player", required: true },
+            { name: "playerName", label: t("player"), required: true },
             {
               name: "clubId",
-              label: "Club",
+              label: t("club"),
               type: "select",
               options: clubOptions,
             },
-            { name: "points", label: "Points", type: "number", min: 0, max: 200 },
-            { name: "assists", label: "Assists", type: "number", min: 0, max: 100 },
+            { name: "points", label: t("points"), type: "number", min: 0, max: 200 },
+            { name: "assists", label: t("assists"), type: "number", min: 0, max: 100 },
           ]}
         />
       </Card>
 
       {stats.length === 0 ? (
-        <EmptyState title="No statistics recorded for this match." />
+        <EmptyState title={t("empty")} />
       ) : (
         <Table
-          caption="Recorded statistics"
+          caption={t("caption")}
           minWidth="32rem"
           head={
             <>
-              <Th sticky>Player</Th>
-              <Th align="right">Points</Th>
-              <Th align="right">Assists</Th>
+              <Th sticky>{t("player")}</Th>
+              <Th align="right">{t("points")}</Th>
+              <Th align="right">{t("assists")}</Th>
               <Th align="right">
-                <span className="sr-only">Actions</span>
+                <span className="sr-only">{t("actions")}</span>
               </Th>
             </>
           }
@@ -134,9 +149,9 @@ export default async function AdminMatchDetailPage({
                 <ToggleButton
                   action={`/api/admin/matches/${match.id}/stats/${stat.id}`}
                   method="DELETE"
-                  label="Remove"
+                  label={t("remove")}
                   tone="dangerGhost"
-                  confirm="Remove this stat line?"
+                  confirm={t("removeConfirm")}
                 />
               </Td>
             </tr>

@@ -1,5 +1,5 @@
 import { requireOwner } from "@/server/auth/ownerGuard";
-import { findClubByOwnerAndId, updateClub } from "@/server/repositories/clubs";
+import { findClubByOwnerAndId, requestClubDeletion, updateClub } from "@/server/repositories/clubs";
 import { fail, notFound, ok, parseId } from "@/server/api/respond";
 import { readJson } from "@/server/validation/validate";
 import { parseOwnerClub } from "@/server/validation/ownerClub";
@@ -57,11 +57,7 @@ export async function PATCH(
 }
 
 /**
- * Club removal is intentionally unavailable. The data model defines cascades
- * for child rows but no product decision for registrations, public documents,
- * fixtures, or historical records; deleting a club here would invent that
- * policy. The confirmation is nevertheless server-validated so a future
- * approved deletion policy cannot accidentally rely on client-side checks.
+ * An owner requests deletion; staff performs the final, irreversible delete.
  */
 export async function DELETE(
   request: Request,
@@ -78,7 +74,9 @@ export async function DELETE(
         { status: 400 }
       );
     }
-    return Response.json({ error: "deletionNotAllowed" }, { status: 409 });
+    const requested = await requestClubDeletion(result.club.id, result.club.owner_id!);
+    if (!requested) return Response.json({ error: "deletionAlreadyRequested" }, { status: 409 });
+    return ok({ request: requested }, 201);
   } catch (error) {
     return fail("delete owner club", error);
   }

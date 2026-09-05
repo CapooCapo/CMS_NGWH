@@ -6,10 +6,16 @@ import {
   createClub,
   createClubMember,
   deleteClubMember,
+  listAdminClubs,
   listClubMembers,
   updateClub,
   updateClubMember,
 } from "../src/server/repositories/clubs";
+import { listAdminUsersPage } from "../src/server/repositories/adminUsers";
+import { listAdminContactMessages } from "../src/server/repositories/contact";
+import { listAdminMatches } from "../src/server/repositories/matches";
+import { listAdminRegistrations } from "../src/server/repositories/registrations";
+import { listAdminSeasons } from "../src/server/repositories/seasons";
 import type { Club } from "../src/server/repositories/types";
 
 /**
@@ -23,7 +29,9 @@ import type { Club } from "../src/server/repositories/types";
  * removed afterwards.
  */
 const TAG = `test-clubs-${process.pid}`;
+const PAGINATION_TAG = `test-admin-page-${process.pid}`;
 let club: Club;
+let highlightedClubId = 0;
 
 before(async () => {
   const created = await createClub({
@@ -42,11 +50,97 @@ before(async () => {
   });
   if (!created) throw new Error("fixture club was not created");
   club = created;
+
+  const seasons = await query<{ id: number }>(
+    `INSERT INTO seasons (slug, name_en, name_vi, starts_on)
+     SELECT $1 || '-' || lpad(n::text, 2, '0'), $2 || n, $3 || n,
+            DATE '2020-01-01' + n
+       FROM generate_series(1, 11) AS n
+     RETURNING id`,
+    [`${PAGINATION_TAG}-season`, "Season ", "Mùa "]
+  );
+  const clubs = await query<{ id: number }>(
+    `INSERT INTO clubs (slug, name, province)
+     SELECT $1 || '-' || lpad(n::text, 2, '0'), $2 || lpad(n::text, 2, '0'), 'Testville'
+       FROM generate_series(1, 11) AS n
+     RETURNING id`,
+    [`${PAGINATION_TAG}-club`, `${PAGINATION_TAG} Club `]
+  );
+  highlightedClubId = clubs[10].id;
+  await query(
+    `INSERT INTO matches (season_id, home_club_id, away_club_id, home_team_name, away_team_name, scheduled_at)
+     SELECT $1, $2, $3, $4 || ' Home ' || n, $4 || ' Away ' || n, now() + (n || ' days')::interval
+       FROM generate_series(1, 11) AS n`,
+    [seasons[0].id, clubs[0].id, clubs[1].id, PAGINATION_TAG]
+  );
+  await query(
+    `INSERT INTO club_registrations (club_name, operating_region, representative_name, representative_email, status)
+     SELECT $1 || n, 'Testville', 'Representative ' || n, $2 || n || '@example.com',
+            CASE WHEN n <= 3 THEN 'rejected' ELSE 'pending' END
+       FROM generate_series(1, 11) AS n`,
+    [`${PAGINATION_TAG} Registration `, `${PAGINATION_TAG}-registration-`]
+  );
+  await query(
+    `INSERT INTO contact_messages (name, email, subject, message, locale, status)
+     SELECT 'Sender ' || n, $1 || n || '@example.com', 'Subject ' || n, 'Message ' || n, 'en',
+            CASE WHEN n <= 3 THEN 'archived' ELSE 'new' END
+       FROM generate_series(1, 11) AS n`,
+    [`${PAGINATION_TAG}-contact-`]
+  );
+  await query(
+    `INSERT INTO admin_users (username, password_hash, role)
+     SELECT $1 || '-' || lpad(n::text, 2, '0'), 'test-hash', 'editor'
+       FROM generate_series(1, 11) AS n`,
+    [`${PAGINATION_TAG}-user`]
+  );
 });
 
 after(async () => {
+  await query("DELETE FROM matches WHERE home_team_name LIKE $1", [`${PAGINATION_TAG}%`]);
+  await query("DELETE FROM club_registrations WHERE club_name LIKE $1", [`${PAGINATION_TAG}%`]);
+  await query("DELETE FROM contact_messages WHERE email LIKE $1", [`${PAGINATION_TAG}%`]);
+  await query("DELETE FROM admin_users WHERE username LIKE $1", [`${PAGINATION_TAG}%`]);
+  await query("DELETE FROM clubs WHERE slug LIKE $1", [`${PAGINATION_TAG}%`]);
+  await query("DELETE FROM seasons WHERE slug LIKE $1", [`${PAGINATION_TAG}%`]);
   await query("DELETE FROM clubs WHERE slug = $1", [TAG]);
   await pool.end();
+});
+
+test("admin repositories cap every record-management list at ten rows", async () => {
+  const [clubs, registrations, contacts, matches, seasons, users] = await Promise.all([
+    listAdminClubs(1),
+    listAdminRegistrations(null, 1),
+    listAdminContactMessages(null, 1),
+    listAdminMatches(1),
+    listAdminSeasons(1),
+    listAdminUsersPage(1),
+  ]);
+
+  for (const result of [clubs, registrations, contacts, matches, seasons, users]) {
+    assert.equal(result.rows.length, 10);
+    assert.ok(result.total >= 11);
+    assert.ok(result.totalPages >= 2);
+  }
+});
+
+test("repository pages clamp, filter at SQL level, and preserve highlighted club links", async () => {
+  const [lastSeasonPage, pending, archived, highlighted, searched] = await Promise.all([
+    listAdminSeasons(999),
+    listAdminRegistrations("pending", 1),
+    listAdminContactMessages("archived", 1),
+    listAdminClubs(1, highlightedClubId),
+    listAdminRegistrations(null, 1, PAGINATION_TAG),
+  ]);
+
+  assert.equal(lastSeasonPage.page, lastSeasonPage.totalPages);
+  assert.ok(lastSeasonPage.rows.length <= 10);
+  assert.ok(pending.total >= 8);
+  assert.ok(pending.rows.every((row) => row.status === "pending"));
+  assert.ok(archived.total >= 3);
+  assert.ok(archived.rows.every((row) => row.status === "archived"));
+  assert.ok(highlighted.rows.some((club) => club.id === highlightedClubId));
+  assert.equal(searched.rows.length, 10);
+  assert.ok(searched.rows.every((row) => row.club_name.startsWith(PAGINATION_TAG)));
 });
 
 test("updateClub persists achievements, contact and social links", async () => {

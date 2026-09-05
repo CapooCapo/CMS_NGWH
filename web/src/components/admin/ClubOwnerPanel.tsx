@@ -3,6 +3,7 @@
 import { JsonForm } from "@/components/admin/JsonForm";
 import { ToggleButton } from "@/components/admin/ToggleButton";
 import { Badge } from "@/components/ui";
+import { useTranslations } from "next-intl";
 import type { ClubOwner } from "@/server/repositories/clubOwners";
 
 /**
@@ -22,21 +23,23 @@ export function ClubOwnerPanel({
   clubId: number;
   owner: ClubOwner | null;
 }) {
+  const t = useTranslations("admin.clubs.owner");
+
   if (owner) {
     return (
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm">
-          Owner: <strong>{owner.email}</strong>
+          {t("owner")}: <strong>{owner.email}</strong>
         </p>
         <Badge tone={owner.is_active ? "success" : "muted"}>
-          {owner.is_active ? "Active" : "Deactivated"}
+          {owner.is_active ? t("active") : t("deactivated")}
         </Badge>
         <ToggleButton
           action={`/api/admin/clubs/${clubId}/owner`}
           method="DELETE"
-          label="Unassign owner"
+          label={t("unassign")}
           tone="dangerGhost"
-          confirm="Unassign this club's owner? Their account will be deactivated and they will lose access immediately."
+          confirm={t("unassignConfirm")}
         />
       </div>
     );
@@ -45,16 +48,16 @@ export function ClubOwnerPanel({
   return (
     <JsonForm
       action={`/api/admin/clubs/${clubId}/owner`}
-      submitLabel="Create & assign owner"
+      submitLabel={t("create")}
       compact
       fields={[
-        { name: "email", label: "Owner email", type: "email", required: true },
+        { name: "email", label: t("email"), type: "email", required: true },
         {
           name: "password",
-          label: "Temporary password",
+          label: t("temporaryPassword"),
           type: "password",
           required: true,
-          hint: "At least 10 characters. Share this with the club representative directly — it is never shown again.",
+          hint: t("temporaryPasswordHint"),
         },
       ]}
     />

@@ -1,13 +1,21 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 import { LoginForm } from "@/components/admin/LoginForm";
 import { currentAdmin } from "@/server/auth/session";
 
-export const metadata: Metadata = {
-  title: "Admin sign in",
-  // Never index the login page.
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const [metaT, t] = await Promise.all([
+    getTranslations("admin.meta"),
+    getTranslations("admin.login"),
+  ]);
+  return {
+    title: metaT("login"),
+    description: t("subtitle"),
+    // Never index the login page.
+    robots: { index: false, follow: false },
+  };
+}
 
 export default async function AdminLoginPage({
   searchParams,

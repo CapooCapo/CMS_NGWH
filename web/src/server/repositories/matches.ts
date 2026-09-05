@@ -1,5 +1,10 @@
 import "server-only";
 import { query, queryOne } from "@/server/db/pool";
+import {
+  ADMIN_PAGE_SIZE,
+  resolvePagination,
+  type PaginatedResult,
+} from "@/lib/pagination";
 import type { Match, MatchStatus, MatchWithContext } from "./types";
 
 const BASE = `m.id, m.season_id, m.home_club_id, m.away_club_id,
@@ -55,6 +60,27 @@ export function listAllMatches(limit = 200): Promise<MatchWithContext[]> {
       ORDER BY m.scheduled_at DESC, m.id DESC LIMIT $1`,
     [Math.min(Math.max(limit, 1), 500)]
   );
+}
+
+/** Bounded fixture-history slice for the admin list, newest first. */
+export async function listAdminMatches(
+  requestedPage: number
+): Promise<PaginatedResult<MatchWithContext>> {
+  const totalRow = await queryOne<{ count: string }>(
+    "SELECT COUNT(*)::text AS count FROM matches"
+  );
+  const pagination = resolvePagination(
+    requestedPage,
+    Number(totalRow?.count ?? 0),
+    ADMIN_PAGE_SIZE
+  );
+  const rows = await query<MatchWithContext>(
+    `SELECT ${WITH_CONTEXT} ${JOINS}
+      ORDER BY m.scheduled_at DESC, m.id DESC
+      LIMIT $1 OFFSET $2`,
+    [pagination.pageSize, pagination.offset]
+  );
+  return { ...pagination, rows };
 }
 
 /** Every match currently in play — drives the public live scoreboard. */

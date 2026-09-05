@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Button } from "@/components/ui";
 
@@ -20,6 +21,8 @@ export function RegistrationReview({
   status: "pending" | "approved" | "rejected";
 }) {
   const router = useRouter();
+  const t = useTranslations("admin.registrations");
+  const actionsT = useTranslations("admin.actions");
   const [pending, setPending] = useState<"approved" | "rejected" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -33,7 +36,7 @@ export function RegistrationReview({
     if (
       action === "approved" &&
       !window.confirm(
-        "Approve this registration? This publishes a public club profile."
+        t("reviewConfirm")
       )
     ) {
       return;
@@ -49,15 +52,15 @@ export function RegistrationReview({
       if (!response.ok) {
         setError(
           response.status === 403
-            ? "Your role cannot review registrations."
-            : "The review could not be saved."
+            ? t("reviewForbidden")
+            : t("reviewFailed")
         );
         return;
       }
       setOpen(false);
       router.refresh();
     } catch {
-      setError("The review could not be saved.");
+      setError(t("reviewFailed"));
     } finally {
       setPending(null);
     }
@@ -71,7 +74,7 @@ export function RegistrationReview({
         </p>
       )}
       {!open ? (
-        <Button size="sm" onClick={() => setOpen(true)}>Review</Button>
+        <Button size="sm" onClick={() => setOpen(true)}>{actionsT("review")}</Button>
       ) : (
         <div className="w-full max-w-sm rounded-[var(--radius-md)] border border-border bg-surface-sunken/70 p-4 shadow-[var(--shadow-xs)]">
           <div className="flex flex-wrap gap-2">
@@ -80,9 +83,9 @@ export function RegistrationReview({
               onClick={() => review("approved")}
               disabled={pending !== null}
               loading={pending === "approved"}
-              loadingLabel="Approving"
+              loadingLabel={actionsT("approving")}
             >
-              Approve
+              {actionsT("approve")}
             </Button>
             <Button
               tone="danger"
@@ -90,12 +93,12 @@ export function RegistrationReview({
               onClick={() => review("rejected")}
               disabled={pending !== null}
               loading={pending === "rejected"}
-              loadingLabel="Rejecting"
+              loadingLabel={actionsT("rejecting")}
             >
-              Reject
+              {actionsT("reject")}
             </Button>
             <Button tone="ghost" size="sm" onClick={() => setOpen(false)}>
-              Cancel
+              {actionsT("cancel")}
             </Button>
           </div>
         </div>

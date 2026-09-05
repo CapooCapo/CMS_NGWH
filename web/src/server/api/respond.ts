@@ -15,6 +15,13 @@ export const notFound = () =>
 export const badRequest = (fields: Record<string, string>) =>
   NextResponse.json({ error: "validation", fields }, { status: 400 });
 
+/**
+ * Provider failures stay deliberately opaque: a translation query URL contains
+ * both the admin's source text and the server-only MyMemory key.
+ */
+export const translationUnavailable = () =>
+  NextResponse.json({ error: "translationUnavailable" }, { status: 503 });
+
 // PostgreSQL SQLSTATE codes worth translating into a client-meaningful status.
 const UNIQUE_VIOLATION = "23505";
 const FOREIGN_KEY_VIOLATION = "23503";

@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { BrandMark } from "@/components/BrandMark";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Eyebrow } from "@/components/ui";
 import { AdminNav } from "./AdminNav";
 import { LogoutButton } from "./LogoutButton";
@@ -15,19 +17,22 @@ import type { AdminIdentity } from "@/server/auth/session";
  * operator wander into the public nav mid-task, and the two surfaces have very
  * different information density.
  */
-export function AdminShell({
+export async function AdminShell({
   admin,
   children,
 }: {
   admin: AdminIdentity;
   children: React.ReactNode;
 }) {
+  const t = await getTranslations("admin");
+  const roleLabel = t(`roles.${admin.role}`);
+
   return (
-    <div className="flex min-h-screen flex-col bg-background lg:flex-row">
+    <div className="flex h-dvh min-w-0 flex-col overflow-hidden bg-background lg:flex-row">
       <a href="#admin-main" className="skip-link">
-        Skip to main content
+        {t("shell.skipToContent")}
       </a>
-      <div className="on-court flex shrink-0 flex-col border-b border-ink-border bg-ink text-ink-foreground lg:w-60 lg:border-b-0 lg:border-r">
+      <aside className="on-court flex shrink-0 flex-col border-b border-ink-border bg-ink text-ink-foreground lg:h-dvh lg:w-60 lg:border-b-0 lg:border-r">
         <div className="flex h-14 items-center gap-2.5 px-4 lg:h-16">
           <Link
             href="/admin/dashboard"
@@ -46,25 +51,37 @@ export function AdminShell({
                 {admin.username}
               </p>
               <Eyebrow tone="muted" className="mt-0.5 !text-ink-muted">
-                {admin.role}
+                {roleLabel}
               </Eyebrow>
             </div>
-            <LogoutButton />
+            <div className="flex flex-col items-end gap-2">
+              <LanguageSwitcher />
+              <LogoutButton />
+            </div>
           </div>
         </div>
-      </div>
+      </aside>
 
-      <div className="min-w-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Signed-in identity on small screens, where the sidebar footer is hidden. */}
         <div className="flex items-center justify-between gap-3 border-b border-border bg-surface px-4 py-3 lg:hidden">
-          <p className="truncate text-[length:var(--text-xs)] text-muted">
+          <p className="min-w-0 truncate text-[length:var(--text-xs)] text-muted">
             <span className="font-semibold text-foreground">{admin.username}</span>{" "}
-            · {admin.role}
+            · {roleLabel}
           </p>
-          <LogoutButton tone="light" />
+          <div className="flex shrink-0 items-center gap-2">
+            <LanguageSwitcher tone="default" />
+            <LogoutButton tone="light" />
+          </div>
         </div>
-        <main id="admin-main" className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-9">
-          {children}
+        <main
+          id="admin-main"
+          tabIndex={-1}
+          className="min-h-0 min-w-0 flex-1 overflow-y-auto outline-none"
+        >
+          <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-9">
+            {children}
+          </div>
         </main>
       </div>
     </div>

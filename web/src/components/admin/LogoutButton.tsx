@@ -1,11 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 /** Posts to the logout endpoint (which deletes the session row) then redirects. */
 export function LogoutButton({ tone = "dark" }: { tone?: "dark" | "light" }) {
   const router = useRouter();
+  const t = useTranslations("admin.actions");
   const [pending, setPending] = useState(false);
 
   return (
@@ -28,7 +30,7 @@ export function LogoutButton({ tone = "dark" }: { tone?: "dark" | "light" }) {
           : "border-border-strong text-muted hover:border-foreground hover:text-foreground"
       }`}
     >
-      {pending ? "…" : "Sign out"}
+      {pending ? t("signingOut") : t("signOut")}
     </button>
   );
 }

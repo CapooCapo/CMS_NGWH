@@ -1,5 +1,5 @@
 import { requireRole, requireViewer } from "@/server/auth/guard";
-import { findClubById, updateClub } from "@/server/repositories/clubs";
+import { deleteRequestedClub, findClubById, updateClub } from "@/server/repositories/clubs";
 import { listClubMembers } from "@/server/repositories/clubs";
 import { parseClub } from "@/server/validation/admin";
 import { fail, notFound, ok, parseId } from "@/server/api/respond";
@@ -36,5 +36,22 @@ export async function PATCH(
     return ok({ club });
   } catch (error) {
     return fail("update club", error);
+  }
+}
+
+/** Finalizes an owner's pending deletion request. */
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const guard = await requireRole();
+  if (!guard.ok) return guard.response;
+  const id = parseId((await params).id);
+  if (!id) return notFound();
+  try {
+    if (!(await deleteRequestedClub(id))) return notFound();
+    return ok({ deleted: true });
+  } catch (error) {
+    return fail("delete requested club", error);
   }
 }

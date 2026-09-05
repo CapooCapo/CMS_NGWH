@@ -1,16 +1,27 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { getLocale, getTranslations } from "next-intl/server";
+import { Fragment } from "react";
+import { AdminPagination } from "@/components/admin/AdminPagination";
 import { AdminPageHeader } from "@/components/admin/AdminShell";
 import { ToggleButton } from "@/components/admin/ToggleButton";
-import { Badge, Card, EmptyState, ErrorState } from "@/components/ui";
+import { Badge, EmptyState, ErrorState, Table, Td, Th } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
-import { listContactMessages } from "@/server/repositories/contact";
+import { filterHref, parsePage } from "@/lib/pagination";
+import { listAdminContactMessages } from "@/server/repositories/contact";
 import type { ContactStatus } from "@/server/repositories/types";
 
-export const metadata: Metadata = {
-  title: "Contact inbox",
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const [metaT, t] = await Promise.all([
+    getTranslations("admin.meta"),
+    getTranslations("admin.contact"),
+  ]);
+  return {
+    title: metaT("contact"),
+    description: t("description"),
+    robots: { index: false, follow: false },
+  };
+}
 
 const STATUSES: readonly ContactStatus[] = ["new", "read", "archived"];
 const TONE = { new: "warning", read: "neutral", archived: "muted" } as const;
@@ -25,43 +36,59 @@ const TONE = { new: "warning", read: "neutral", archived: "muted" } as const;
 export default async function AdminContactPage({
   searchParams,
 }: PageProps<"/admin/contact">) {
+  const [t, statusT, actionsT, locale] = await Promise.all([
+    getTranslations("admin.contact"),
+    getTranslations("admin.status"),
+    getTranslations("admin.actions"),
+    getLocale(),
+  ]);
   const params = await searchParams;
   const raw = Array.isArray(params.status) ? params.status[0] : params.status;
   const status = STATUSES.includes(raw as ContactStatus)
     ? (raw as ContactStatus)
     : null;
+  const page = parsePage(params.page);
+  const rawMessage = Array.isArray(params.message) ? params.message[0] : params.message;
+  const selectedMessageId = rawMessage ? Number.parseInt(rawMessage, 10) : null;
 
   let messages;
   try {
-    messages = await listContactMessages(status);
+    messages = await listAdminContactMessages(status, page);
   } catch (error) {
     console.error("admin contact", error);
     return (
       <>
-        <AdminPageHeader title="Contact inbox" />
-        <ErrorState title="Database unavailable" />
+        <AdminPageHeader title={t("title")} />
+        <ErrorState title={t("databaseUnavailable")} />
       </>
     );
   }
 
+  const hrefForMessage = (id: number) => {
+    const query = new URLSearchParams();
+    if (status) query.set("status", status);
+    if (messages.page > 1) query.set("page", String(messages.page));
+    if (selectedMessageId !== id) query.set("message", String(id));
+    const suffix = query.toString();
+    return `/admin/contact${suffix ? `?${suffix}` : ""}`;
+  };
+
   return (
     <>
       <AdminPageHeader
-        title="Contact inbox"
-        description="Submissions are stored here; no automatic email routing is configured (OQ-014)."
+        title={t("title")}
+        description={t("description")}
       />
 
-      <nav aria-label="Filter by status" className="mb-5">
+      <nav aria-label={t("filterByStatus")} className="mb-5">
         <ul className="flex flex-wrap gap-2">
-          {[{ value: null, label: "All" }, ...STATUSES.map((s) => ({ value: s, label: s }))].map(
-            (item) => (
+          {[
+            { value: null, label: actionsT("all") },
+            ...STATUSES.map((value) => ({ value, label: statusT(value) })),
+          ].map((item) => (
               <li key={item.value ?? "all"}>
                 <Link
-                  href={
-                    item.value
-                      ? `/admin/contact?status=${item.value}`
-                      : "/admin/contact"
-                  }
+                    href={filterHref("/admin/contact", { status: item.value ?? undefined })}
                   aria-current={item.value === status ? "true" : undefined}
                   className={`inline-flex h-8 items-center rounded-[var(--radius-pill)] border px-3 text-[length:var(--text-xs)] font-semibold capitalize transition-colors duration-[var(--motion-fast)] ${
                     item.value === status
@@ -77,57 +104,69 @@ export default async function AdminContactPage({
         </ul>
       </nav>
 
-      {messages.length === 0 ? (
-        <EmptyState title="No messages." />
+      {messages.rows.length === 0 ? (
+        <EmptyState title={t("empty")} />
       ) : (
-        <ul className="flex flex-col gap-3">
-          {messages.map((message) => (
-            <li key={message.id}>
-              <Card className="p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="font-semibold">
-                        {message.subject || "(no subject)"}
-                      </h2>
-                      <Badge tone={TONE[message.status]}>{message.status}</Badge>
-                      <Badge tone="muted">{message.locale.toUpperCase()}</Badge>
-                    </div>
-                    <p className="mt-1 text-[length:var(--text-sm)] text-muted">
-                      {message.name} ·{" "}
-                      <a href={`mailto:${message.email}`} className="hover:underline">
+        <>
+          <Table
+            caption={t("tableCaption")}
+            minWidth="52rem"
+            head={
+              <>
+                <Th sticky>{t("sender")}</Th>
+                <Th>{t("subject")}</Th>
+                <Th>{t("received")}</Th>
+                <Th>{t("status")}</Th>
+                <Th align="right">{t("actions")}</Th>
+              </>
+            }
+          >
+            {messages.rows.map((message) => {
+              const isSelected = selectedMessageId === message.id;
+              return (
+                <Fragment key={message.id}>
+                  <tr key={message.id} className={isSelected ? "bg-accent/10" : "hover:bg-surface-sunken"}>
+                    <Td header sticky>
+                      <span className="block font-semibold">{message.name}</span>
+                      <a href={`mailto:${message.email}`} className="text-[length:var(--text-xs)] font-normal text-muted hover:underline">
                         {message.email}
-                      </a>{" "}
-                      · {formatDateTime(message.created_at, "en")}
-                    </p>
-                    <p className="mt-3 whitespace-pre-line rounded-[var(--radius-sm)] border border-border bg-surface-sunken p-3 text-[length:var(--text-sm)] leading-relaxed">
-                      {message.message}
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    {message.status !== "read" && (
-                      <ToggleButton
-                        action={`/api/admin/contact/${message.id}`}
-                        method="PATCH"
-                        body={{ status: "read" }}
-                        label="Mark read"
-                      />
-                    )}
-                    {message.status !== "archived" && (
-                      <ToggleButton
-                        action={`/api/admin/contact/${message.id}`}
-                        method="PATCH"
-                        body={{ status: "archived" }}
-                        label="Archive"
-                        tone="ghost"
-                      />
-                    )}
-                  </div>
-                </div>
-              </Card>
-            </li>
-          ))}
-        </ul>
+                      </a>
+                    </Td>
+                    <Td>
+                      <span className="font-medium">{message.subject || t("noSubject")}</span>
+                      <span className="ml-2 text-[length:var(--text-xs)] text-muted">{message.locale.toUpperCase()}</span>
+                    </Td>
+                    <Td className="whitespace-nowrap text-muted">{formatDateTime(message.created_at, locale) ?? "—"}</Td>
+                    <Td><Badge tone={TONE[message.status]}>{statusT(message.status)}</Badge></Td>
+                    <Td align="right">
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Link href={hrefForMessage(message.id)} aria-expanded={isSelected} className="text-[length:var(--text-sm)] font-semibold text-brand-text-text hover:underline">
+                          {isSelected ? t("closeDetails") : t("details")}
+                        </Link>
+                        {message.status !== "read" && (
+                          <ToggleButton action={`/api/admin/contact/${message.id}`} method="PATCH" body={{ status: "read" }} label={actionsT("markRead")} />
+                        )}
+                        {message.status !== "archived" && (
+                          <ToggleButton action={`/api/admin/contact/${message.id}`} method="PATCH" body={{ status: "archived" }} label={actionsT("archive")} tone="ghost" />
+                        )}
+                      </div>
+                    </Td>
+                  </tr>
+                  {isSelected && (
+                    <tr key={`${message.id}-detail`} className="bg-surface-sunken/45">
+                      <Td colSpan={5}>
+                        <p className="whitespace-pre-line rounded-[var(--radius-sm)] border border-border bg-surface p-3 text-[length:var(--text-sm)] leading-relaxed">
+                          {message.message}
+                        </p>
+                      </Td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </Table>
+          <AdminPagination basePath="/admin/contact" pagination={messages} searchParams={{ status: status ?? undefined }} />
+        </>
       )}
     </>
   );

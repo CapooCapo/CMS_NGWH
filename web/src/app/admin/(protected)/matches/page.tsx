@@ -1,20 +1,31 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { getLocale, getTranslations } from "next-intl/server";
+import { Fragment } from "react";
+import { AdminPagination } from "@/components/admin/AdminPagination";
 import { AdminPageHeader } from "@/components/admin/AdminShell";
 import { Disclosure, JsonForm } from "@/components/admin/JsonForm";
 import { ScoreConsole } from "@/components/admin/ScoreConsole";
 import { ToggleButton } from "@/components/admin/ToggleButton";
-import { Badge, Card, EmptyState, ErrorState } from "@/components/ui";
+import { Badge, EmptyState, ErrorState, Table, Td, Th } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
+import { parsePage } from "@/lib/pagination";
 import { listClubs } from "@/server/repositories/clubs";
-import { listAllMatches, listLiveMatches } from "@/server/repositories/matches";
+import { listAdminMatches, listLiveMatches } from "@/server/repositories/matches";
 import { listSeasons } from "@/server/repositories/seasons";
 import { currentAdmin } from "@/server/auth/session";
 
-export const metadata: Metadata = {
-  title: "Matches & scoreboard",
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const [metaT, t] = await Promise.all([
+    getTranslations("admin.meta"),
+    getTranslations("admin.matches"),
+  ]);
+  return {
+    title: metaT("matches"),
+    description: t("description"),
+    robots: { index: false, follow: false },
+  };
+}
 
 /**
  * REQ-TOURN-001 fixture management plus the live scoreboard console.
@@ -23,13 +34,25 @@ export const metadata: Metadata = {
  * a game that is the only thing the operator needs. Creating and deleting
  * fixtures is `editor`/`admin`; score updates are also open to `operator`.
  */
-export default async function AdminMatchesPage() {
-  const admin = await currentAdmin();
+export default async function AdminMatchesPage({
+  searchParams,
+}: PageProps<"/admin/matches">) {
+  const [admin, locale, t, statusT, actionsT] = await Promise.all([
+    currentAdmin(),
+    getLocale(),
+    getTranslations("admin.matches"),
+    getTranslations("admin.status"),
+    getTranslations("admin.actions"),
+  ]);
+  const params = await searchParams;
+  const page = parsePage(params.page);
+  const rawScoreboard = Array.isArray(params.scoreboard) ? params.scoreboard[0] : params.scoreboard;
+  const selectedScoreboardId = rawScoreboard ? Number.parseInt(rawScoreboard, 10) : null;
 
   let matches, seasons, clubs, live;
   try {
     [matches, seasons, clubs, live] = await Promise.all([
-      listAllMatches(100),
+      listAdminMatches(page),
       listSeasons(),
       listClubs({ approvedOnly: false, limit: 100 }),
       listLiveMatches(),
@@ -38,15 +61,15 @@ export default async function AdminMatchesPage() {
     console.error("admin matches", error);
     return (
       <>
-        <AdminPageHeader title="Matches & scoreboard" />
-        <ErrorState title="Database unavailable" />
+        <AdminPageHeader title={t("title")} />
+        <ErrorState title={t("databaseUnavailable")} />
       </>
     );
   }
 
   const seasonOptions = seasons.map((season) => ({
     value: String(season.id),
-    label: season.name_en,
+    label: locale === "vi" ? season.name_vi : season.name_en,
   }));
   const clubOptions = clubs.rows.map((club) => ({
     value: String(club.id),
@@ -57,12 +80,19 @@ export default async function AdminMatchesPage() {
   // API re-checks this regardless of what the page renders.
   const canEdit =
     admin?.role === "superadmin" || admin?.role === "admin" || admin?.role === "editor";
+  const hrefForScoreboard = (id: number) => {
+    const query = new URLSearchParams();
+    if (matches.page > 1) query.set("page", String(matches.page));
+    if (selectedScoreboardId !== id) query.set("scoreboard", String(id));
+    const suffix = query.toString();
+    return `/admin/matches${suffix ? `?${suffix}` : ""}`;
+  };
 
   return (
     <>
       <AdminPageHeader
-        title="Matches & scoreboard"
-        description="Scores entered here appear immediately on the public Live & Results widget."
+        title={t("title")}
+        description={t("description")}
       />
 
       {live.length > 0 && (
@@ -71,7 +101,7 @@ export default async function AdminMatchesPage() {
             id="live-consoles"
             className="eyebrow mb-3 flex items-center gap-2 text-muted"
           >
-            Live now
+            {t("liveNow")}
             <Badge tone="live">{live.length}</Badge>
           </h2>
           <ul className="flex flex-col gap-3">
@@ -86,61 +116,61 @@ export default async function AdminMatchesPage() {
 
       {canEdit && (
         <div className="mb-6">
-          <Disclosure label="Add a fixture">
+          <Disclosure label={t("add")}>
             {seasons.length === 0 ? (
               <p className="text-[length:var(--text-sm)] text-muted">
-                Create a season first — a fixture must belong to one.
+                {t("createSeasonFirst")}
               </p>
             ) : (
               <JsonForm
                 action="/api/admin/matches"
-                submitLabel="Create fixture"
+                submitLabel={t("create")}
                 fields={[
                   {
                     name: "seasonId",
-                    label: "Season",
+                    label: t("season"),
                     type: "select",
                     required: true,
                     options: seasonOptions,
                   },
                   {
                     name: "scheduledAt",
-                    label: "Tip-off",
+                    label: t("tipOff"),
                     type: "datetime-local",
                     required: true,
                   },
-                  { name: "homeTeamName", label: "Home team name", required: true },
-                  { name: "awayTeamName", label: "Away team name", required: true },
+                  { name: "homeTeamName", label: t("homeTeamName"), required: true },
+                  { name: "awayTeamName", label: t("awayTeamName"), required: true },
                   {
                     name: "homeClubId",
-                    label: "Home club (optional link)",
+                    label: t("homeClub"),
                     type: "select",
                     options: clubOptions,
-                    hint: "Links the fixture to a club profile and the standings table.",
+                    hint: t("clubHint"),
                   },
                   {
                     name: "awayClubId",
-                    label: "Away club (optional link)",
+                    label: t("awayClub"),
                     type: "select",
                     options: clubOptions,
                   },
-                  { name: "venue", label: "Venue" },
+                  { name: "venue", label: t("venue") },
                   {
                     name: "status",
-                    label: "Status",
+                    label: t("status"),
                     type: "select",
                     required: true,
                     defaultValue: "scheduled",
                     options: [
-                      { value: "scheduled", label: "Scheduled" },
-                      { value: "live", label: "Live" },
-                      { value: "completed", label: "Completed" },
-                      { value: "postponed", label: "Postponed" },
-                      { value: "cancelled", label: "Cancelled" },
+                      { value: "scheduled", label: statusT("scheduled") },
+                      { value: "live", label: statusT("live") },
+                      { value: "completed", label: statusT("completed") },
+                      { value: "postponed", label: statusT("postponed") },
+                      { value: "cancelled", label: statusT("cancelled") },
                     ],
                   },
-                  { name: "homeScore", label: "Home score", type: "number", min: 0, max: 500 },
-                  { name: "awayScore", label: "Away score", type: "number", min: 0, max: 500 },
+                  { name: "homeScore", label: t("homeScore"), type: "number", min: 0, max: 500 },
+                  { name: "awayScore", label: t("awayScore"), type: "number", min: 0, max: 500 },
                 ]}
               />
             )}
@@ -148,63 +178,40 @@ export default async function AdminMatchesPage() {
         </div>
       )}
 
-      {matches.length === 0 ? (
-        <EmptyState title="No fixtures yet." />
+      {matches.rows.length === 0 ? (
+        <EmptyState title={t("empty")} />
       ) : (
-        <ul className="flex flex-col gap-3">
-          {matches.map((match) => (
-            <li key={match.id}>
-              <Card className="p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="font-semibold">
-                        {match.home_team_name} vs {match.away_team_name}
-                      </h2>
-                      <Badge tone={match.status === "live" ? "live" : "neutral"}>
-                        {match.status}
-                      </Badge>
-                      {(match.status === "live" || match.status === "completed") && (
-                        <span className="font-display tabular font-bold">
-                          {match.home_score}–{match.away_score}
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-0.5 text-[length:var(--text-sm)] text-muted">
-                      {match.season_name_en} · {formatDateTime(match.scheduled_at, "en")}
-                      {match.venue ? ` · ${match.venue}` : ""}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Link
-                      href={`/admin/matches/${match.id}`}
-                      className="text-[length:var(--text-sm)] font-semibold text-brand-text-text hover:underline"
-                    >
-                      Stats
-                    </Link>
-                    {(admin?.role === "superadmin" || admin?.role === "admin") && (
-                      <ToggleButton
-                        action={`/api/admin/matches/${match.id}`}
-                        method="DELETE"
-                        label="Delete"
-                        tone="dangerGhost"
-                        confirm="Delete this fixture? Its recorded statistics are deleted too."
-                      />
-                    )}
-                  </div>
-                </div>
-
-                {match.status !== "live" && (
-                  <div className="mt-3">
-                    <Disclosure label="Scoreboard">
-                      <ScoreConsole match={match} />
-                    </Disclosure>
-                  </div>
-                )}
-              </Card>
-            </li>
-          ))}
-        </ul>
+        <>
+          <Table
+            caption={t("tableCaption")}
+            minWidth="58rem"
+            head={<><Th sticky>{t("fixture")}</Th><Th>{t("season")}</Th><Th>{t("tipOff")}</Th><Th>{t("status")}</Th><Th align="right">{t("score")}</Th><Th align="right">{t("actions")}</Th></>}
+          >
+            {matches.rows.map((match) => {
+              const selected = selectedScoreboardId === match.id && match.status !== "live";
+              return (
+                <Fragment key={match.id}>
+                  <tr className={selected ? "bg-accent/10" : "hover:bg-surface-sunken"}>
+                    <Td header sticky><span className="block">{match.home_team_name} vs {match.away_team_name}</span>{match.venue && <span className="block text-[length:var(--text-xs)] font-normal text-muted">{match.venue}</span>}</Td>
+                    <Td>{locale === "vi" ? match.season_name_vi : match.season_name_en}</Td>
+                    <Td className="whitespace-nowrap text-muted">{formatDateTime(match.scheduled_at, locale) ?? "—"}</Td>
+                    <Td><Badge tone={match.status === "live" ? "live" : "neutral"}>{statusT(match.status)}</Badge></Td>
+                    <Td align="right" numeric strong className="font-display">{match.status === "live" || match.status === "completed" ? `${match.home_score}–${match.away_score}` : "—"}</Td>
+                    <Td align="right">
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Link href={`/admin/matches/${match.id}`} className="text-[length:var(--text-sm)] font-semibold text-brand-text-text hover:underline">{actionsT("stats")}</Link>
+                        {match.status !== "live" && <Link href={hrefForScoreboard(match.id)} aria-expanded={selected} className="text-[length:var(--text-sm)] font-semibold text-brand-text-text hover:underline">{selected ? t("closeScoreboard") : t("scoreboard")}</Link>}
+                        {(admin?.role === "superadmin" || admin?.role === "admin") && <ToggleButton action={`/api/admin/matches/${match.id}`} method="DELETE" label={actionsT("delete")} tone="dangerGhost" confirm={t("deleteConfirm")} />}
+                      </div>
+                    </Td>
+                  </tr>
+                  {selected && <tr className="bg-surface-sunken/45"><Td colSpan={6}><ScoreConsole match={match} /></Td></tr>}
+                </Fragment>
+              );
+            })}
+          </Table>
+          <AdminPagination basePath="/admin/matches" pagination={matches} searchParams={{}} />
+        </>
       )}
     </>
   );

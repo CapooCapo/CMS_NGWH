@@ -19,6 +19,13 @@ function withExtension(absolute) {
 }
 
 export function resolve(specifier, context, next) {
+  // Next 16 ships CommonJS entrypoints without a package `exports` map. Node's
+  // ESM resolver therefore needs the explicit extension for route-handler
+  // tests, while Next's own bundler continues to use these specifiers normally.
+  if (specifier === "next/server" || specifier === "next/headers") {
+    return next(`${specifier}.js`, context);
+  }
+
   // `@/x` -> <repo>/src/x
   if (specifier.startsWith("@/")) {
     const resolved = withExtension(path.join(SRC, specifier.slice(2)));

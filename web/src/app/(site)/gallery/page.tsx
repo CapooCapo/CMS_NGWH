@@ -59,7 +59,10 @@ export default async function GalleryPage({
   searchParams,
 }: PageProps<"/gallery">) {
   const locale = await getLocale();
-  const t = await getTranslations("gallery");
+  const [t, common] = await Promise.all([
+    getTranslations("gallery"),
+    getTranslations("common"),
+  ]);
   const resolvedSearchParams = await searchParams;
 
   const items = await client.fetch(
@@ -157,8 +160,10 @@ export default async function GalleryPage({
                 currentPage={hogPagination.currentPage}
                 totalPages={hogPagination.totalPages}
                 searchParams={baseSearchParams}
-                previousLabel={t("previousPage")}
-                nextLabel={t("nextPage")}
+                paginationLabel={common("pagination")}
+                previousLabel={common("previousPage")}
+                nextLabel={common("nextPage")}
+                pageLabel={(page) => common("page", { page, total: hogPagination.totalPages })}
               />
             </>
           )}
@@ -212,8 +217,10 @@ export default async function GalleryPage({
                 currentPage={mvpPagination.currentPage}
                 totalPages={mvpPagination.totalPages}
                 searchParams={baseSearchParams}
-                previousLabel={t("previousPage")}
-                nextLabel={t("nextPage")}
+                paginationLabel={common("pagination")}
+                previousLabel={common("previousPage")}
+                nextLabel={common("nextPage")}
+                pageLabel={(page) => common("page", { page, total: mvpPagination.totalPages })}
               />
             </>
           )}
@@ -239,8 +246,10 @@ export default async function GalleryPage({
                 currentPage={btsPagination.currentPage}
                 totalPages={btsPagination.totalPages}
                 searchParams={baseSearchParams}
-                previousLabel={t("previousPage")}
-                nextLabel={t("nextPage")}
+                paginationLabel={common("pagination")}
+                previousLabel={common("previousPage")}
+                nextLabel={common("nextPage")}
+                pageLabel={(page) => common("page", { page, total: btsPagination.totalPages })}
               />
             </>
           )}

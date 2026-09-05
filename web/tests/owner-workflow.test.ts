@@ -27,6 +27,8 @@ type Fixture = {
   password: string;
   ownerId: number;
   cookie: string;
+  achievementsEn: string;
+  achievementsVi: string;
 };
 let clubA: Fixture | null = null;
 let clubB: Fixture | null = null;
@@ -54,6 +56,21 @@ async function createClubWithOwner(suffix: string): Promise<Fixture | null> {
 
   const email = `${TAG}-${suffix}@example.com`;
   const password = `owner-test-pass-${suffix}-2026!`;
+  const achievementsEn = `Champions ${suffix.toUpperCase()} 2025`;
+  const achievementsVi = `Vô địch ${suffix.toUpperCase()} năm 2025`;
+  const achievementRes = await fetch(`${BASE}/api/admin/clubs/${club.id}`, {
+    method: "PATCH",
+    headers: { Cookie: adminCookie, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      slug: club.slug,
+      name: `Owner WF Club ${suffix.toUpperCase()}`,
+      province: "Testville",
+      achievementsEn,
+      achievementsVi,
+      isApproved: true,
+    }),
+  });
+  if (!achievementRes.ok) return null;
   const ownerRes = await fetch(`${BASE}/api/admin/clubs/${club.id}/owner`, {
     method: "POST",
     headers: { Cookie: adminCookie, "Content-Type": "application/json" },
@@ -70,7 +87,16 @@ async function createClubWithOwner(suffix: string): Promise<Fixture | null> {
   const cookie = extractCookie(loginRes, "ngwh_owner_session");
   if (!cookie) return null;
 
-  return { clubId: club.id, slug: club.slug, email, password, ownerId: owner.id, cookie };
+  return {
+    clubId: club.id,
+    slug: club.slug,
+    email,
+    password,
+    ownerId: owner.id,
+    cookie,
+    achievementsEn,
+    achievementsVi,
+  };
 }
 
 before(async () => {
@@ -124,6 +150,7 @@ test("every /api/owner/* endpoint rejects an unauthenticated caller with 401", a
     ["GET", "/api/owner/clubs/1"],
     ["PATCH", "/api/owner/clubs/1"],
     ["DELETE", "/api/owner/clubs/1"],
+    ["DELETE", "/api/owner/clubs/1/deletion-request"],
     ["POST", "/api/owner/club/members"],
     ["PATCH", "/api/owner/club/members/1"],
     ["DELETE", "/api/owner/club/members/1"],
@@ -209,7 +236,7 @@ test("an owner cannot update or request deletion of another owner's club", async
   assert.equal(remove.status, 404);
 });
 
-test("club deletion confirmation is exact and no club data is removed without a policy", async (t) => {
+test("an owner can request then cancel a club deletion", async (t) => {
   if (!ready()) return t.skip("fixtures unavailable");
   for (const confirmation of ["delete", "Delete", "", " DELETE"]) {
     const response = await fetch(`${BASE}/api/owner/clubs/${clubA!.clubId}`, {
@@ -225,12 +252,25 @@ test("club deletion confirmation is exact and no club data is removed without a 
     headers: { Cookie: clubA!.cookie, "Content-Type": "application/json" },
     body: JSON.stringify({ confirmation: "DELETE" }),
   });
-  assert.equal(confirmed.status, 409, "there is no approved data-retention deletion policy");
+  assert.equal(confirmed.status, 201);
+
+  const requested = await fetch(`${BASE}/api/owner/clubs/${clubA!.clubId}`, {
+    headers: { Cookie: clubA!.cookie },
+  });
+  const requestedBody = (await requested.json()) as { club: { deletion_requested_at: string | null } };
+  assert.ok(requestedBody.club.deletion_requested_at);
+
+  const cancelled = await fetch(`${BASE}/api/owner/clubs/${clubA!.clubId}/deletion-request`, {
+    method: "DELETE",
+    headers: { Cookie: clubA!.cookie },
+  });
+  assert.equal(cancelled.status, 200);
 
   const remains = await fetch(`${BASE}/api/owner/clubs/${clubA!.clubId}`, {
     headers: { Cookie: clubA!.cookie },
   });
-  assert.equal(remains.status, 200);
+  const remainingBody = (await remains.json()) as { club: { deletion_requested_at: string | null } };
+  assert.equal(remainingBody.club.deletion_requested_at, null);
 });
 
 test("an authenticated owner can open their account profile", async (t) => {
@@ -267,12 +307,16 @@ test("an owner persists every supported social link, while slug/isApproved remai
       slug: string;
       is_approved: boolean;
       social_links: Record<string, string>;
+      achievements_en: string | null;
+      achievements_vi: string | null;
     };
   };
   assert.equal(body.club.name, "Owner WF Club A — edited");
   assert.equal(body.club.province, "Edited Province");
   assert.equal(body.club.slug, clubA!.slug, "slug must be unchanged");
   assert.equal(body.club.is_approved, true, "isApproved must be unchanged");
+  assert.equal(body.club.achievements_en, clubA!.achievementsEn);
+  assert.equal(body.club.achievements_vi, clubA!.achievementsVi);
   assert.deepEqual(body.club.social_links, {
     facebook: "https://facebook.example.com/owner-wf",
     instagram: "https://instagram.example.com/owner-wf",
@@ -288,6 +332,44 @@ test("an owner persists every supported social link, while slug/isApproved remai
     club: { social_links: Record<string, string> };
   };
   assert.deepEqual(afterReload.club.social_links, body.club.social_links);
+});
+
+test("public club profiles select each achievement locale and fall back to the original", async (t) => {
+  if (!ready()) return t.skip("fixtures unavailable");
+
+  const english = await fetch(`${BASE}/clubs/${clubA!.slug}`, {
+    headers: { Cookie: "NEXT_LOCALE=en" },
+  });
+  assert.equal(english.status, 200);
+  const englishHtml = await english.text();
+  assert.match(englishHtml, new RegExp(clubA!.achievementsEn));
+
+  const vietnamese = await fetch(`${BASE}/clubs/${clubA!.slug}`, {
+    headers: { Cookie: "NEXT_LOCALE=vi" },
+  });
+  assert.equal(vietnamese.status, 200);
+  const vietnameseHtml = await vietnamese.text();
+  assert.match(vietnameseHtml, new RegExp(clubA!.achievementsVi));
+
+  const fallbackAchievement = "English original without a Vietnamese translation";
+  const removeTranslation = await fetch(`${BASE}/api/admin/clubs/${clubB!.clubId}`, {
+    method: "PATCH",
+    headers: { Cookie: adminCookie!, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      slug: clubB!.slug,
+      name: "Owner WF Club B",
+      province: "Testville",
+      achievementsEn: fallbackAchievement,
+      achievementsVi: null,
+      isApproved: true,
+    }),
+  });
+  assert.equal(removeTranslation.status, 200);
+  const fallbackPage = await fetch(`${BASE}/clubs/${clubB!.slug}`, {
+    headers: { Cookie: "NEXT_LOCALE=vi" },
+  });
+  assert.equal(fallbackPage.status, 200);
+  assert.match(await fallbackPage.text(), new RegExp(fallbackAchievement));
 });
 
 test("full roster CRUD for an owner's own club", async (t) => {

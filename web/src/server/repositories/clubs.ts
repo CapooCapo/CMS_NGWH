@@ -1,12 +1,19 @@
 import "server-only";
-import { query, queryOne } from "@/server/db/pool";
+import { query, queryOne, transaction } from "@/server/db/pool";
+import {
+  ADMIN_PAGE_SIZE,
+  resolvePagination,
+  type PaginatedResult,
+} from "@/lib/pagination";
 import type { Club, ClubMember, ClubMemberRole } from "./types";
 import { STAFF_ROLES } from "@/lib/clubMembers";
 
 const COLUMNS = `id, slug, name, province, founding_year, logo_url,
   achievements_en, achievements_vi, contact_email, contact_phone, website_url,
   social_links, is_approved, owner_id,
-  to_char(approved_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS approved_at`;
+  to_char(approved_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS approved_at,
+  (SELECT to_char(requested_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+     FROM club_deletion_requests WHERE club_id = clubs.id) AS deletion_requested_at`;
 
 export type ClubFilter = {
   /** BR-001: public callers must pass true so unapproved clubs stay hidden. */
@@ -17,16 +24,7 @@ export type ClubFilter = {
   offset?: number;
 };
 
-/**
- * REQ-CLUB-001/002 — directory listing with province filter and name search.
- *
- * BR-001 is enforced here rather than in the page: `approvedOnly` is a required
- * field of the filter so a caller cannot accidentally omit it and leak pending
- * club profiles.
- */
-export async function listClubs(
-  filter: ClubFilter
-): Promise<{ rows: Club[]; total: number }> {
+function clubWhere(filter: ClubFilter): { whereSql: string; params: unknown[] } {
   const where: string[] = [];
   const params: unknown[] = [];
 
@@ -42,7 +40,21 @@ export async function listClubs(
       `(name ILIKE $${params.length} OR province ILIKE $${params.length})`
     );
   }
-  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+  return { whereSql: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
+}
+
+/**
+ * REQ-CLUB-001/002 — directory listing with province filter and name search.
+ *
+ * BR-001 is enforced here rather than in the page: `approvedOnly` is a required
+ * field of the filter so a caller cannot accidentally omit it and leak pending
+ * club profiles.
+ */
+export async function listClubs(
+  filter: ClubFilter
+): Promise<{ rows: Club[]; total: number }> {
+  const { whereSql, params } = clubWhere(filter);
 
   const totalRow = await queryOne<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM clubs ${whereSql}`,
@@ -55,11 +67,52 @@ export async function listClubs(
 
   const rows = await query<Club>(
     `SELECT ${COLUMNS} FROM clubs ${whereSql}
-      ORDER BY name ASC
+      ORDER BY name ASC, id ASC
       LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params
   );
   return { rows, total: Number(totalRow?.count ?? 0) };
+}
+
+/**
+ * Bounded staff list. A legacy `highlight` link resolves to the page that
+ * contains its club so registration review links keep working after paging.
+ */
+export async function listAdminClubs(
+  requestedPage: number,
+  highlightId: number | null = null
+): Promise<PaginatedResult<Club>> {
+  const { whereSql, params } = clubWhere({ approvedOnly: false });
+  const totalRow = await queryOne<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM clubs ${whereSql}`,
+    params
+  );
+  const total = Number(totalRow?.count ?? 0);
+  let page = requestedPage;
+
+  if (highlightId && Number.isSafeInteger(highlightId) && highlightId > 0) {
+    const highlighted = await queryOne<{ name: string; id: number }>(
+      "SELECT name, id FROM clubs WHERE id = $1",
+      [highlightId]
+    );
+    if (highlighted) {
+      const before = await queryOne<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM clubs
+          WHERE name < $1 OR (name = $1 AND id < $2)`,
+        [highlighted.name, highlighted.id]
+      );
+      page = Math.floor(Number(before?.count ?? 0) / ADMIN_PAGE_SIZE) + 1;
+    }
+  }
+
+  const pagination = resolvePagination(page, total, ADMIN_PAGE_SIZE);
+  const rows = await query<Club>(
+    `SELECT ${COLUMNS} FROM clubs
+      ORDER BY name ASC, id ASC
+      LIMIT $1 OFFSET $2`,
+    [pagination.pageSize, pagination.offset]
+  );
+  return { ...pagination, rows };
 }
 
 /** Distinct provinces for the filter control (REQ-CLUB-002). */
@@ -86,6 +139,39 @@ export function findClubBySlug(
 
 export function findClubById(id: number): Promise<Club | null> {
   return queryOne<Club>(`SELECT ${COLUMNS} FROM clubs WHERE id = $1`, [id]);
+}
+
+/** Creates at most one pending deletion request for an owner's own club. */
+export function requestClubDeletion(clubId: number, ownerId: number): Promise<{ club_id: number } | null> {
+  return queryOne(
+    `INSERT INTO club_deletion_requests (club_id, requested_by)
+     SELECT id, owner_id FROM clubs WHERE id = $1 AND owner_id = $2
+     ON CONFLICT (club_id) DO NOTHING
+     RETURNING club_id`,
+    [clubId, ownerId]
+  );
+}
+
+export function cancelClubDeletionRequest(clubId: number, ownerId: number): Promise<{ club_id: number } | null> {
+  return queryOne(
+    `DELETE FROM club_deletion_requests
+      WHERE club_id = $1 AND requested_by = $2
+      RETURNING club_id`,
+    [clubId, ownerId]
+  );
+}
+
+/** Final, staff-authorized deletion; it is impossible without a pending request. */
+export async function deleteRequestedClub(clubId: number): Promise<boolean> {
+  return transaction(async (client) => {
+    const result = await client.query(
+      `DELETE FROM clubs
+        WHERE id = $1
+          AND EXISTS (SELECT 1 FROM club_deletion_requests WHERE club_id = clubs.id)`,
+      [clubId]
+    );
+    return result.rowCount === 1;
+  });
 }
 
 const MEMBER_COLUMNS = `id, club_id, full_name, member_role, shirt_number,

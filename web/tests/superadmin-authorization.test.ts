@@ -186,6 +186,7 @@ test("subadmin cannot mutate business content", async (t) => {
     ["POST", "/api/admin/registrations/1/review", { action: "approved" }],
     ["POST", "/api/admin/registrations/bulk", { action: "approve", ids: [1] }],
     ["PATCH", "/api/admin/registrations/1/documents/1", { isPublic: true }],
+    ["POST", "/api/admin/translate", {}],
   ];
   for (const [method, path, body] of mutations) {
     const response = await fetch(`${BASE}${path}`, {
@@ -195,6 +196,27 @@ test("subadmin cannot mutate business content", async (t) => {
     });
     assert.equal(response.status, 403, `${method} ${path} returned ${response.status}`);
   }
+});
+
+test("translation is available to admin and superadmin but not subadmin", async (t) => {
+  if (!ready()) return t.skip("fixtures unavailable");
+
+  for (const role of ["superadmin", "admin"] as const) {
+    const response = await fetch(`${BASE}/api/admin/translate`, {
+      method: "POST",
+      headers: { ...as(role), "Content-Type": "application/json" },
+      // Invalid input proves the guard passed without contacting MyMemory.
+      body: "{}",
+    });
+    assert.equal(response.status, 400, `${role} should pass the role guard`);
+  }
+
+  const response = await fetch(`${BASE}/api/admin/translate`, {
+    method: "POST",
+    headers: { ...as("subadmin"), "Content-Type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(response.status, 403);
 });
 
 test("subadmin cannot read or mutate staff accounts", async (t) => {

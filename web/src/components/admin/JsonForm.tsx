@@ -1,7 +1,14 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
+import {
+  LocalizedPairFields,
+  type LocalizedPairSpec,
+  LocalizedSingleFields,
+  type LocalizedSingleSpec,
+} from "@/components/admin/AdminTranslationTool";
 import {
   Button,
   Field,
@@ -72,24 +79,9 @@ export type FieldSpec =
       defaultValue?: Record<string, string>;
       hint?: string;
       colSpan?: 1 | 2;
-    };
-
-const ERROR_TEXT: Record<string, string> = {
-  required: "This field is required",
-  invalid: "This value is not valid",
-  tooShort: "Too short",
-  tooLong: "Too long",
-  invalidEmail: "Enter a valid email address",
-  invalidPhone: "Enter a valid phone number",
-  invalidUrl: "Enter a valid URL",
-  invalidNumber: "Enter a whole number",
-  outOfRange: "Out of range",
-  invalidChoice: "Choose one of the available options",
-  invalidDate: "Enter a valid date",
-  invalidSlug: "Lowercase letters, numbers and hyphens only",
-  duplicate: "That value is already taken",
-  invalidReference: "Referenced record does not exist",
-};
+    }
+  | LocalizedPairSpec
+  | LocalizedSingleSpec;
 
 export function JsonForm({
   action,
@@ -107,12 +99,38 @@ export function JsonForm({
   compact?: boolean;
 }) {
   const router = useRouter();
+  const tErrors = useTranslations("errors");
+  const tForm = useTranslations("admin.forms");
   const baseId = useId();
   const [pending, setPending] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [translationResetVersion, setTranslationResetVersion] = useState(0);
 
   const fieldId = (name: string) => `${baseId}-${name}`;
+  const errorForCode = (code: string) => {
+    switch (code) {
+      case "required":
+      case "invalid":
+      case "tooShort":
+      case "tooLong":
+      case "invalidEmail":
+      case "invalidPhone":
+      case "invalidUrl":
+      case "invalidNumber":
+      case "outOfRange":
+      case "invalidChoice":
+      case "invalidDate":
+      case "invalidSlug":
+      case "duplicate":
+      case "invalidReference":
+        return tErrors(code);
+      case "headCoachManaged":
+        return tForm("headCoachManaged");
+      default:
+        return tForm("errorSave");
+    }
+  };
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -123,6 +141,21 @@ export function JsonForm({
     const form = new FormData(event.currentTarget);
     const payload: Record<string, unknown> = {};
     for (const field of fields) {
+      if (field.type === "localizedPair") {
+        for (const localizedField of [field.en, field.vi]) {
+          const raw = form.get(localizedField.name);
+          payload[localizedField.name] =
+            typeof raw === "string" && raw.trim() !== "" ? raw.trim() : null;
+        }
+        continue;
+      }
+      if (field.type === "localizedSingle") {
+        for (const name of [field.enName, field.viName]) {
+          const raw = form.get(name);
+          payload[name] = typeof raw === "string" && raw.trim() !== "" ? raw.trim() : null;
+        }
+        continue;
+      }
       if (field.type === "urlgroup") {
         const group: Record<string, string> = {};
         for (const { key } of field.keys) {
@@ -152,6 +185,7 @@ export function JsonForm({
       });
       if (response.ok) {
         (event.target as HTMLFormElement).reset();
+        setTranslationResetVersion((version) => version + 1);
         onDone?.();
         router.refresh();
         return;
@@ -161,11 +195,11 @@ export function JsonForm({
         error?: string;
       };
       if (data.fields) setErrors(data.fields);
-      else if (data.error === "forbidden") setFormError("Your role cannot do that.");
-      else if (data.error && ERROR_TEXT[data.error]) setFormError(ERROR_TEXT[data.error]);
-      else setFormError("The change could not be saved.");
+      else if (data.error === "forbidden") setFormError(tForm("errorForbidden"));
+      else if (data.error) setFormError(errorForCode(data.error));
+      else setFormError(tForm("errorSave"));
     } catch {
-      setFormError("The change could not be saved.");
+      setFormError(tForm("errorSave"));
     } finally {
       setPending(false);
     }
@@ -181,8 +215,32 @@ export function JsonForm({
         }
       >
         {fields.map((field) => {
+          if (field.type === "localizedPair") {
+            return (
+              <LocalizedPairFields
+                key={`${field.en.name}-${field.vi.name}-${field.en.defaultValue ?? ""}-${field.vi.defaultValue ?? ""}-${translationResetVersion}`}
+                pair={field}
+                fieldId={fieldId}
+                errors={errors}
+                errorForCode={errorForCode}
+              />
+            );
+          }
+
+          if (field.type === "localizedSingle") {
+            return (
+              <LocalizedSingleFields
+                key={`${field.enName}-${field.viName}-${field.defaultEn ?? ""}-${field.defaultVi ?? ""}-${translationResetVersion}`}
+                field={field}
+                fieldId={fieldId}
+                errors={errors}
+                errorForCode={errorForCode}
+              />
+            );
+          }
+
           const code = errors[field.name];
-          const message = code ? (ERROR_TEXT[code] ?? code) : null;
+          const message = code ? errorForCode(code) : null;
           const invalid = message ? controlInvalidClass : "";
 
           if (field.type === "checkbox") {
@@ -237,7 +295,7 @@ export function JsonForm({
                           name={`${field.name}.${key}`}
                           type="url"
                           defaultValue={field.defaultValue?.[key] ?? ""}
-                          placeholder="https://…"
+                          placeholder={tForm("urlPlaceholder")}
                           className={controlClass}
                         />
                       )}
@@ -301,7 +359,7 @@ export function JsonForm({
         })}
 
         {compact && (
-          <Button type="submit" loading={pending} loadingLabel="Saving">
+          <Button type="submit" loading={pending} loadingLabel={tForm("loadingSaving")}>
             {submitLabel}
           </Button>
         )}
@@ -309,7 +367,7 @@ export function JsonForm({
 
       {!compact && (
         <div>
-          <Button type="submit" loading={pending} loadingLabel="Saving">
+          <Button type="submit" loading={pending} loadingLabel={tForm("loadingSaving")}>
             {submitLabel}
           </Button>
         </div>

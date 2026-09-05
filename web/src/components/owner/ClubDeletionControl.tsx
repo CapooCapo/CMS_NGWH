@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button, Field, FormAlert, controlClass } from "@/components/ui";
 
 /**
@@ -10,9 +11,11 @@ import { Button, Field, FormAlert, controlClass } from "@/components/ui";
  */
 export function ClubDeletionControl({
   clubId,
+  requested,
   labels,
 }: {
   clubId: number;
+  requested: boolean;
   labels: {
     open: string;
     title: string;
@@ -22,8 +25,11 @@ export function ClubDeletionControl({
     confirm: string;
     unavailable: string;
     failed: string;
+    requested: string;
+    cancelRequest: string;
   };
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const [pending, setPending] = useState(false);
@@ -56,7 +62,11 @@ export function ClubDeletionControl({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirmation }),
       });
-      if (response.ok) return;
+      if (response.ok) {
+        close();
+        router.refresh();
+        return;
+      }
       const data = (await response.json().catch(() => ({}))) as { error?: string };
       setError(data.error === "deletionNotAllowed" ? labels.unavailable : labels.failed);
     } catch {
@@ -66,11 +76,36 @@ export function ClubDeletionControl({
     }
   }
 
+  async function cancelRequest() {
+    setPending(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/owner/clubs/${clubId}/deletion-request`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error("cancel failed");
+      router.refresh();
+    } catch {
+      setError(labels.failed);
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
     <>
-      <Button type="button" tone="danger" onClick={() => setOpen(true)}>
-        {labels.open}
-      </Button>
+      {requested ? (
+        <span className="flex items-center gap-2">
+          <span className="text-[length:var(--text-sm)] font-semibold text-warning-text">{labels.requested}</span>
+          <Button type="button" tone="outline" onClick={cancelRequest} loading={pending}>
+            {labels.cancelRequest}
+          </Button>
+        </span>
+      ) : (
+        <Button type="button" tone="danger" onClick={() => setOpen(true)}>
+          {labels.open}
+        </Button>
+      )}
       {open && (
         <div
           role="dialog"

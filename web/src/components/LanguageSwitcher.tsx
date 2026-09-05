@@ -1,12 +1,11 @@
 "use client";
 
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useTransition } from "react";
 import { setLocaleAction } from "@/i18n/actions";
 import { SUPPORTED_LOCALES } from "@/i18n/config";
 
 const LABELS: Record<string, string> = { en: "EN", vi: "VI" };
-const FULL_NAMES: Record<string, string> = { en: "English", vi: "Tiếng Việt" };
 
 /**
  * REQ-GLOBAL-001 / BR-003 — locale switcher.
@@ -21,13 +20,18 @@ export function LanguageSwitcher({
   tone?: "onBrand" | "default";
 }) {
   const locale = useLocale();
+  const t = useTranslations("common");
   const [isPending, startTransition] = useTransition();
   const onBrand = tone === "onBrand";
+  const fullNames: Record<string, string> = {
+    en: t("english"),
+    vi: t("vietnamese"),
+  };
 
   return (
     <div
       role="group"
-      aria-label="Language"
+      aria-label={t("language")}
       aria-busy={isPending || undefined}
       className={`inline-flex items-center rounded-[var(--radius-pill)] p-0.5 border ${
         onBrand ? "border-white/25 bg-black/15" : "border-border bg-surface-sunken/60"
@@ -42,7 +46,7 @@ export function LanguageSwitcher({
             lang={code}
             disabled={isPending || active}
             aria-current={active ? "true" : undefined}
-            title={FULL_NAMES[code]}
+            title={fullNames[code]}
             onClick={() => startTransition(() => setLocaleAction(code))}
             className={[
               "eyebrow rounded-[var(--radius-pill)] px-2.5 py-1 transition-all duration-[var(--motion-fast)]",
@@ -56,7 +60,7 @@ export function LanguageSwitcher({
               isPending && !active ? "opacity-60" : "",
             ].join(" ")}
           >
-            <span className="sr-only">{FULL_NAMES[code]}</span>
+            <span className="sr-only">{fullNames[code]}</span>
             <span aria-hidden="true">{LABELS[code] ?? code.toUpperCase()}</span>
           </button>
         );

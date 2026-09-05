@@ -151,8 +151,10 @@ export default async function NewsIndexPage({
               currentPage={page}
               totalPages={totalPages}
               searchParams={{ category: category ?? undefined }}
+              paginationLabel={common("pagination")}
               previousLabel={common("previousPage")}
               nextLabel={common("nextPage")}
+              pageLabel={(item) => common("page", { page: item, total: totalPages })}
             />
           </>
         )}

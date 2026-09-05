@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { controlClass } from "@/components/ui";
 
@@ -16,32 +17,29 @@ import { controlClass } from "@/components/ui";
  * Applies on change with a confirmation, because a role change takes effect on
  * the target's next request and is not obviously reversible by them.
  */
-const DENY_TEXT: Record<string, string> = {
-  forbidden: "Your role cannot do that.",
-  cannotModifySelf: "You cannot change your own role.",
-  cannotModifySuperadmin: "Only a superadmin can modify a superadmin account.",
-  cannotAssignSuperadmin: "Only a superadmin can assign the superadmin role.",
-  lastSuperadmin: "This is the last active superadmin.",
-};
-
 export function RoleSelect({
   userId,
   currentRole,
+  currentRoleLabel,
   options,
 }: {
   userId: number;
   currentRole: string;
+  currentRoleLabel?: string;
   options: { value: string; label: string }[];
 }) {
   const router = useRouter();
+  const t = useTranslations("admin.users");
+  const formsT = useTranslations("admin.forms");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function change(nextRole: string) {
     if (nextRole === currentRole) return;
+    const nextRoleLabel = options.find((option) => option.value === nextRole)?.label ?? nextRole;
     if (
       !window.confirm(
-        `Change this account's role to ${nextRole}? It applies on their next request.`
+        t("changeRoleConfirm", { role: nextRoleLabel })
       )
     ) {
       return;
@@ -56,14 +54,21 @@ export function RoleSelect({
       });
       if (!response.ok) {
         const data = (await response.json().catch(() => ({}))) as { error?: string };
+        const denyText: Record<string, string> = {
+          forbidden: formsT("errorForbidden"),
+          cannotModifySelf: t("cannotChangeOwnRole"),
+          cannotModifySuperadmin: t("cannotModifySuperadmin"),
+          cannotAssignSuperadmin: t("cannotAssignSuperadmin"),
+          lastSuperadmin: t("lastSuperadmin"),
+        };
         setError(
-          (data.error && DENY_TEXT[data.error]) ?? "That change could not be saved."
+          (data.error && denyText[data.error]) ?? formsT("errorSave")
         );
         return;
       }
       router.refresh();
     } catch {
-      setError("That change could not be saved.");
+      setError(formsT("errorSave"));
     } finally {
       setPending(false);
     }
@@ -72,7 +77,7 @@ export function RoleSelect({
   return (
     <span className="inline-flex flex-col items-start gap-1">
       <label className="sr-only" htmlFor={`role-${userId}`}>
-        Role
+        {t("roleLabel")}
       </label>
       <select
         id={`role-${userId}`}
@@ -81,7 +86,7 @@ export function RoleSelect({
         onChange={(event) => change(event.target.value)}
         className={`${controlClass} h-9 w-auto py-0 text-[length:var(--text-xs)]`}
       >
-        <option value={currentRole}>{currentRole}</option>
+        <option value={currentRole}>{currentRoleLabel ?? currentRole}</option>
         {options
           .filter((option) => option.value !== currentRole)
           .map((option) => (

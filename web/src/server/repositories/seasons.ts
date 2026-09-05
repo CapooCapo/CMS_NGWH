@@ -1,5 +1,10 @@
 import "server-only";
 import { query, queryOne } from "@/server/db/pool";
+import {
+  ADMIN_PAGE_SIZE,
+  resolvePagination,
+  type PaginatedResult,
+} from "@/lib/pagination";
 import type { Season, SeasonStatus } from "./types";
 
 const COLUMNS = `id, slug, name_en, name_vi,
@@ -13,6 +18,27 @@ export function listSeasons(): Promise<Season[]> {
     `SELECT ${COLUMNS} FROM seasons
       ORDER BY COALESCE(starts_on, '1900-01-01') DESC, id DESC`
   );
+}
+
+/** Bounded season list for management screens. Archive callers use listSeasons. */
+export async function listAdminSeasons(
+  requestedPage: number
+): Promise<PaginatedResult<Season>> {
+  const totalRow = await queryOne<{ count: string }>(
+    "SELECT COUNT(*)::text AS count FROM seasons"
+  );
+  const pagination = resolvePagination(
+    requestedPage,
+    Number(totalRow?.count ?? 0),
+    ADMIN_PAGE_SIZE
+  );
+  const rows = await query<Season>(
+    `SELECT ${COLUMNS} FROM seasons
+      ORDER BY COALESCE(starts_on, '1900-01-01') DESC, id DESC
+      LIMIT $1 OFFSET $2`,
+    [pagination.pageSize, pagination.offset]
+  );
+  return { ...pagination, rows };
 }
 
 export function findSeasonBySlug(slug: string): Promise<Season | null> {

@@ -1,5 +1,10 @@
 import "server-only";
 import { query, queryOne, transaction } from "@/server/db/pool";
+import {
+  ADMIN_PAGE_SIZE,
+  resolvePagination,
+  type PaginatedResult,
+} from "@/lib/pagination";
 import type { ClubRegistration, RegistrationStatus } from "./types";
 
 const COLUMNS = `id, club_name, operating_region, representative_name,
@@ -130,6 +135,56 @@ export function listRegistrations(
        ORDER BY r.created_at DESC`,
     params
   );
+}
+
+/** Bounded admin review queue. Public/owner list contracts stay unchanged. */
+export async function listAdminRegistrations(
+  status: RegistrationStatus | null,
+  requestedPage: number,
+  search: string | null = null
+): Promise<PaginatedResult<RegistrationListItem>> {
+  const params: unknown[] = [];
+  const conditions: string[] = [];
+  if (status) {
+    params.push(status);
+    conditions.push(`r.status = $${params.length}`);
+  }
+  const normalizedSearch = search?.trim();
+  if (normalizedSearch) {
+    params.push(`%${normalizedSearch}%`);
+    conditions.push(
+      `(r.club_name ILIKE $${params.length} OR r.operating_region ILIKE $${params.length} OR r.representative_name ILIKE $${params.length} OR r.representative_email ILIKE $${params.length})`
+    );
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const totalRow = await queryOne<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM club_registrations r ${where}`,
+    params
+  );
+  const pagination = resolvePagination(
+    requestedPage,
+    Number(totalRow?.count ?? 0),
+    ADMIN_PAGE_SIZE
+  );
+
+  const rows = await query<RegistrationListItem>(
+    `SELECT r.id, r.club_name, r.operating_region, r.representative_name,
+            r.representative_email, r.representative_phone, r.notes, r.status,
+            r.review_note,
+            to_char(r.reviewed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS reviewed_at,
+            r.club_id,
+            to_char(r.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
+            (SELECT COUNT(*) FROM registration_documents d
+              WHERE d.registration_id = r.id)::int AS document_count
+       FROM club_registrations r
+       ${where}
+       ORDER BY r.created_at DESC, r.id DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, pagination.pageSize, pagination.offset]
+  );
+
+  return { ...pagination, rows };
 }
 
 export function findRegistrationById(

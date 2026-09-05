@@ -30,6 +30,7 @@ export type Club = {
   is_approved: boolean;
   approved_at: string | null;
   owner_id: number | null;
+  deletion_requested_at: string | null;
 };
 
 export type ClubMemberRole = "player" | "coach" | "staff";

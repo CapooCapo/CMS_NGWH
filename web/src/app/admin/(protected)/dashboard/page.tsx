@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { getTranslations } from "next-intl/server";
 import { AdminPageHeader, AdminSection } from "@/components/admin/AdminShell";
 import { Badge, Card, ErrorState } from "@/components/ui";
 import { countAdminUsers } from "@/server/repositories/adminUsers";
@@ -9,13 +10,24 @@ import { getLiveAndResults } from "@/server/repositories/matches";
 import { countRegistrationsByStatus } from "@/server/repositories/registrations";
 import { listSeasons } from "@/server/repositories/seasons";
 
-export const metadata: Metadata = {
-  title: "Admin dashboard",
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const [metaT, t] = await Promise.all([
+    getTranslations("admin.meta"),
+    getTranslations("admin.dashboard"),
+  ]);
+  return {
+    title: metaT("dashboard"),
+    description: t("description"),
+    robots: { index: false, follow: false },
+  };
+}
 
 /** Live counts straight from the database — no cached or mocked figures. */
 export default async function AdminDashboard() {
+  const [t, statusT] = await Promise.all([
+    getTranslations("admin.dashboard"),
+    getTranslations("admin.status"),
+  ]);
   let data;
   try {
     const [registrations, clubs, approved, seasons, live, contact, users] =
@@ -33,10 +45,10 @@ export default async function AdminDashboard() {
     console.error("admin dashboard", error);
     return (
       <>
-        <AdminPageHeader title="Dashboard" />
+        <AdminPageHeader title={t("title")} />
         <ErrorState
-          title="Database unavailable"
-          body="The application database could not be reached. Start it with `docker compose up -d` and reload."
+          title={t("databaseUnavailable")}
+          body={t("databaseUnavailableBody")}
         />
       </>
     );
@@ -49,19 +61,19 @@ export default async function AdminDashboard() {
    */
   const actions = [
     {
-      label: "Pending registrations",
+      label: t("pendingRegistrations"),
       value: data.registrations.pending,
       href: "/admin/registrations?status=pending",
       tone: "warning" as const,
     },
     {
-      label: "New contact messages",
+      label: t("newContactMessages"),
       value: data.contact,
       href: "/admin/contact?status=new",
       tone: "warning" as const,
     },
     {
-      label: "Live matches",
+      label: t("liveMatches"),
       value: data.live.live.length,
       href: "/admin/matches",
       tone: "live" as const,
@@ -70,28 +82,28 @@ export default async function AdminDashboard() {
 
   const counters = [
     {
-      label: "Clubs published",
+      label: t("clubsPublished"),
       value: `${data.approved.total} / ${data.clubs.total}`,
       href: "/admin/clubs",
     },
     {
-      label: "Registrations approved",
+      label: t("registrationsApproved"),
       value: data.registrations.approved,
       href: "/admin/registrations?status=approved",
     },
-    { label: "Seasons", value: data.seasons.length, href: "/admin/seasons" },
-    { label: "Staff accounts", value: data.users, href: "/admin/users" },
+    { label: t("seasons"), value: data.seasons.length, href: "/admin/seasons" },
+    { label: t("staffAccounts"), value: data.users, href: "/admin/users" },
   ];
 
   return (
     <>
       <AdminPageHeader
-        title="Dashboard"
-        description="Current state of the application database."
+        title={t("title")}
+        description={t("description")}
       />
 
       {actions.length > 0 && (
-        <AdminSection title="Needs attention">
+        <AdminSection title={t("needsAttention")}>
           <ul className="divide-y divide-border overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-xs)]">
             {actions.map((item) => (
               <li key={item.label}>
@@ -106,7 +118,7 @@ export default async function AdminDashboard() {
                     {item.label}
                   </span>
                   <Badge tone={item.tone}>
-                    {item.tone === "live" ? "Live" : "Action"}
+                    {item.tone === "live" ? statusT("live") : t("action")}
                   </Badge>
                   <span aria-hidden="true" className="shrink-0 text-muted">
                     →
@@ -118,7 +130,7 @@ export default async function AdminDashboard() {
         </AdminSection>
       )}
 
-      <AdminSection title="At a glance">
+      <AdminSection title={t("atAGlance")}>
         <ul className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
           {counters.map((item) => (
             <li key={item.label}>
@@ -137,12 +149,9 @@ export default async function AdminDashboard() {
       </AdminSection>
 
       <Card className="bg-surface-sunken/50 p-6">
-        <h2 className="eyebrow mb-2 text-muted">Content sources</h2>
+        <h2 className="eyebrow mb-2 text-muted">{t("contentSources")}</h2>
         <p className="max-w-[72ch] text-[length:var(--text-sm)] leading-relaxed text-muted">
-          Editorial content — news, gallery, about, contact details, the home
-          hero and partners — is managed in Sanity Studio. This admin manages
-          transactional data only: registrations, clubs, seasons, matches,
-          statistics, contact submissions and staff accounts.
+          {t("contentSourcesBody")}
         </p>
       </Card>
     </>

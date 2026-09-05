@@ -224,6 +224,7 @@ export default async function MyClubPage() {
               </ButtonLink>
               <ClubDeletionControl
                 clubId={club.id}
+                requested={Boolean(club.deletion_requested_at)}
                 labels={{
                   open: myClub("deleteClub"),
                   title: myClub("deleteClub"),
@@ -233,6 +234,8 @@ export default async function MyClubPage() {
                   confirm: myClub("deleteClubConfirm"),
                   unavailable: myClub("deleteClubUnavailable"),
                   failed: myClub("deleteClubFailed"),
+                  requested: myClub("deleteClubRequested"),
+                  cancelRequest: myClub("cancelDeleteClubRequest"),
                 }}
               />
             </>
@@ -313,20 +316,6 @@ export default async function MyClubPage() {
                 { name: "websiteUrl", label: myClub("fieldWebsite"), type: "url", defaultValue: club.website_url },
                 { name: "contactEmail", label: myClub("fieldContactEmail"), type: "email", defaultValue: club.contact_email },
                 { name: "contactPhone", label: myClub("fieldContactPhone"), type: "tel", defaultValue: club.contact_phone },
-                {
-                  name: "achievementsEn",
-                  label: myClub("fieldAchievementsEn"),
-                  type: "textarea",
-                  colSpan: 2,
-                  defaultValue: club.achievements_en,
-                },
-                {
-                  name: "achievementsVi",
-                  label: myClub("fieldAchievementsVi"),
-                  type: "textarea",
-                  colSpan: 2,
-                  defaultValue: club.achievements_vi,
-                },
                 {
                   name: "socialLinks",
                   label: myClub("fieldSocialLinks"),

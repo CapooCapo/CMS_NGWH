@@ -1,8 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { BrandMark } from "@/components/BrandMark";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Button, Card, Field, FormAlert, controlClass } from "@/components/ui";
 
 /**
@@ -14,6 +16,7 @@ import { Button, Card, Field, FormAlert, controlClass } from "@/components/ui";
  */
 export function LoginForm({ next }: { next: string }) {
   const router = useRouter();
+  const t = useTranslations("admin.login");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const id = useId();
@@ -39,11 +42,11 @@ export function LoginForm({ next }: { next: string }) {
       }
       setError(
         response.status === 401
-          ? "Incorrect username or password."
-          : "Sign-in failed. Please try again."
+          ? t("invalidCredentials")
+          : t("failed")
       );
     } catch {
-      setError("Sign-in failed. Please try again.");
+      setError(t("failed"));
     } finally {
       setPending(false);
     }
@@ -51,21 +54,24 @@ export function LoginForm({ next }: { next: string }) {
 
   return (
     <Card className="w-full max-w-sm overflow-hidden">
-      <div className="on-court flex flex-col items-center gap-3 bg-ink px-6 py-7 text-center text-ink-foreground">
+      <div className="on-court relative flex flex-col items-center gap-3 bg-ink px-6 py-7 text-center text-ink-foreground">
+        <div className="absolute right-3 top-3">
+          <LanguageSwitcher />
+        </div>
         <span className="text-accent">
           <BrandMark showText={false} />
         </span>
         <div>
-          <h1 className="text-[length:var(--text-lg)] font-extrabold">Staff sign in</h1>
+          <h1 className="text-[length:var(--text-lg)] font-extrabold">{t("title")}</h1>
           <p className="mt-1 text-[length:var(--text-xs)] text-ink-muted">
-            Authorized personnel only.
+            {t("subtitle")}
           </p>
         </div>
       </div>
 
       <form onSubmit={onSubmit} className="flex flex-col gap-4 px-6 py-6">
         {error && <FormAlert title={error} />}
-        <Field id={`${id}-u`} label="Username" required>
+        <Field id={`${id}-u`} label={t("username")} required>
           {(field) => (
             <input
               {...field}
@@ -76,7 +82,7 @@ export function LoginForm({ next }: { next: string }) {
             />
           )}
         </Field>
-        <Field id={`${id}-p`} label="Password" required>
+        <Field id={`${id}-p`} label={t("password")} required>
           {(field) => (
             <input
               {...field}
@@ -87,8 +93,8 @@ export function LoginForm({ next }: { next: string }) {
             />
           )}
         </Field>
-        <Button type="submit" size="lg" loading={pending} loadingLabel="Signing in">
-          Sign in
+        <Button type="submit" size="lg" loading={pending} loadingLabel={t("signingIn")}>
+          {t("signIn")}
         </Button>
       </form>
     </Card>

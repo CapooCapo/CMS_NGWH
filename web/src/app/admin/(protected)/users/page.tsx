@@ -1,13 +1,16 @@
 import type { Metadata } from "next";
+import { getLocale, getTranslations } from "next-intl/server";
+import { AdminPagination } from "@/components/admin/AdminPagination";
 import { AdminPageHeader } from "@/components/admin/AdminShell";
 import { Disclosure, JsonForm } from "@/components/admin/JsonForm";
 import { RoleSelect } from "@/components/admin/RoleSelect";
 import { ToggleButton } from "@/components/admin/ToggleButton";
-import { Badge, Card, ErrorState } from "@/components/ui";
+import { Badge, EmptyState, ErrorState, Table, Td, Th } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
+import { parsePage } from "@/lib/pagination";
 import {
   countActiveSuperadmins,
-  listAdminUsers,
+  listAdminUsersPage,
 } from "@/server/repositories/adminUsers";
 import { currentAdmin } from "@/server/auth/session";
 import {
@@ -18,10 +21,17 @@ import {
 } from "@/server/auth/permissions";
 import { redirect } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: "Staff accounts",
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const [metaT, t] = await Promise.all([
+    getTranslations("admin.meta"),
+    getTranslations("admin.users"),
+  ]);
+  return {
+    title: metaT("users"),
+    description: t("description"),
+    robots: { index: false, follow: false },
+  };
+}
 
 /**
  * Staff account management — `admin` role only, re-checked here because a page
@@ -32,43 +42,45 @@ export const metadata: Metadata = {
  * to make the BR-001 approval workflow actionable.
  */
 
-/** Display names for the role badges and selectors. */
-const ROLE_LABEL: Record<string, string> = {
-  superadmin: "Superadmin",
-  admin: "Admin",
-  editor: "Editor",
-  operator: "Operator",
-  subadmin: "Subadmin",
-};
-
-export default async function AdminUsersPage() {
+export default async function AdminUsersPage({
+  searchParams,
+}: PageProps<"/admin/users">) {
+  const [t, roleT, statusT, actionsT, locale] = await Promise.all([
+    getTranslations("admin.users"),
+    getTranslations("admin.roles"),
+    getTranslations("admin.status"),
+    getTranslations("admin.actions"),
+    getLocale(),
+  ]);
   const admin = await currentAdmin();
   if (!admin) redirect("/admin/login");
   if (!canManageUsers(admin.role)) {
     return (
       <>
-        <AdminPageHeader title="Staff accounts" />
+        <AdminPageHeader title={t("title")} />
         <ErrorState
-          title="Not permitted"
-          body="Only an administrator can manage staff accounts."
+          title={t("notPermitted")}
+          body={t("notPermittedBody")}
         />
       </>
     );
   }
+  const params = await searchParams;
+  const page = parsePage(params.page);
 
   let users;
   let activeSuperadmins = 0;
   try {
     [users, activeSuperadmins] = await Promise.all([
-      listAdminUsers(),
+      listAdminUsersPage(page),
       countActiveSuperadmins(),
     ]);
   } catch (error) {
     console.error("admin users", error);
     return (
       <>
-        <AdminPageHeader title="Staff accounts" />
-        <ErrorState title="Database unavailable" />
+        <AdminPageHeader title={t("title")} />
+        <ErrorState title={t("databaseUnavailable")} />
       </>
     );
   }
@@ -76,28 +88,28 @@ export default async function AdminUsersPage() {
   return (
     <>
       <AdminPageHeader
-        title="Staff accounts"
-        description="Superadmin (system, manages superadmins) · admin (all business actions) · editor (content and review) · operator (scoreboard only) · subadmin (read-only)."
+        title={t("title")}
+        description={t("description")}
       />
 
       <div className="mb-6">
-        <Disclosure label="Add a staff account">
+        <Disclosure label={t("add")}>
           <JsonForm
             action="/api/admin/users"
-            submitLabel="Create account"
+            submitLabel={t("create")}
             fields={[
-              { name: "username", label: "Username", required: true },
-              { name: "email", label: "Email", type: "email" },
+              { name: "username", label: t("username"), required: true },
+              { name: "email", label: t("email"), type: "email" },
               {
                 name: "password",
-                label: "Password",
+                label: t("password"),
                 type: "password",
                 required: true,
-                hint: "At least 10 characters. Stored only as a scrypt hash.",
+                hint: t("passwordHint"),
               },
               {
                 name: "role",
-                label: "Role",
+                label: t("role"),
                 type: "select",
                 required: true,
                 defaultValue: "editor",
@@ -109,7 +121,7 @@ export default async function AdminUsersPage() {
                  */
                 options: assignableRoles(admin.role).map((role) => ({
                   value: role,
-                  label: ROLE_LABEL[role] ?? role,
+                  label: roleT(role),
                 })),
               },
             ]}
@@ -117,8 +129,16 @@ export default async function AdminUsersPage() {
         </Disclosure>
       </div>
 
-      <ul className="flex flex-col gap-3">
-        {users.map((user) => {
+      {users.rows.length === 0 ? (
+        <EmptyState title={t("empty")} />
+      ) : (
+        <>
+          <Table
+            caption={t("tableCaption")}
+            minWidth="52rem"
+            head={<><Th sticky>{t("account")}</Th><Th>{t("role")}</Th><Th>{t("status")}</Th><Th>{t("lastLogin")}</Th><Th align="right">{t("actions")}</Th></>}
+          >
+        {users.rows.map((user) => {
           const isSelf = user.id === admin.id;
           const actor = { id: admin.id, role: admin.role };
           const target = { id: user.id, role: user.role };
@@ -132,75 +152,38 @@ export default async function AdminUsersPage() {
           );
 
           return (
-            <li key={user.id}>
-              <Card
-                className={`flex flex-wrap items-center justify-between gap-3 p-4 ${
-                  user.role === "superadmin" ? "border-accent-strong/45" : ""
-                }`}
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="font-semibold">{user.username}</h2>
-                    <Badge tone={user.role === "superadmin" ? "brand" : "neutral"}>
-                      {ROLE_LABEL[user.role] ?? user.role}
-                    </Badge>
-                    <Badge tone={user.is_active ? "success" : "muted"}>
-                      {user.is_active ? "Active" : "Disabled"}
-                    </Badge>
-                    {isSelf && <Badge tone="accent">You</Badge>}
-                  </div>
-                  <p className="mt-0.5 text-[length:var(--text-sm)] text-muted">
-                    {user.email ?? "no email"} ·{" "}
-                    {user.last_login_at
-                      ? `last signed in ${formatDateTime(user.last_login_at, "en")}`
-                      : "never signed in"}
-                  </p>
-                  {!deactivation.allowed && !isSelf && (
-                    <p className="mt-1.5 text-[length:var(--text-xs)] text-muted">
-                      {deactivation.reason === "cannotModifySuperadmin"
-                        ? "Only a superadmin can modify a superadmin account."
-                        : deactivation.reason === "lastSuperadmin"
-                          ? "This is the last active superadmin."
-                          : "Your role cannot modify this account."}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
+            <tr key={user.id} className={user.role === "superadmin" ? "bg-accent/5 hover:bg-surface-sunken" : "hover:bg-surface-sunken"}>
+              <Td header sticky>
+                <span className="block">{user.username} {isSelf && <Badge tone="accent">{t("you")}</Badge>}</span>
+                <span className="block text-[length:var(--text-xs)] font-normal text-muted">{user.email ?? t("noEmail")}</span>
+              </Td>
+              <Td><Badge tone={user.role === "superadmin" ? "brand" : "neutral"}>{roleT(user.role)}</Badge></Td>
+              <Td><Badge tone={user.is_active ? "success" : "muted"}>{user.is_active ? statusT("active") : statusT("disabled")}</Badge></Td>
+              <Td className="whitespace-nowrap text-muted">{user.last_login_at ? formatDateTime(user.last_login_at, locale) ?? "—" : t("neverSignedIn")}</Td>
+              <Td align="right">
+                <div className="flex flex-wrap justify-end gap-2">
                   {roleEditable && !isSelf && (
-                    <RoleSelect
-                      userId={user.id}
-                      currentRole={user.role}
-                      options={assignableRoles(admin.role)
-                        .filter((role) =>
-                          canChangeRole(actor, target, role, activeSuperadmins).allowed
-                        )
-                        .map((role) => ({
-                          value: role,
-                          label: ROLE_LABEL[role] ?? role,
-                        }))}
-                    />
+                    <RoleSelect userId={user.id} currentRole={user.role} currentRoleLabel={roleT(user.role)} options={assignableRoles(admin.role)
+                      .filter((role) => canChangeRole(actor, target, role, activeSuperadmins).allowed)
+                      .map((role) => ({ value: role, label: roleT(role) }))} />
                   )}
                   {deactivation.allowed && (
-                    <ToggleButton
-                      action={`/api/admin/users/${user.id}`}
-                      method="PATCH"
-                      body={{ isActive: !user.is_active }}
-                      label={user.is_active ? "Disable" : "Enable"}
-                      tone={user.is_active ? "outline" : "primary"}
-                      confirm={
-                        user.is_active
-                          ? "Disable this account? Their sessions stop working immediately."
-                          : undefined
-                      }
-                    />
+                    <ToggleButton action={`/api/admin/users/${user.id}`} method="PATCH" body={{ isActive: !user.is_active }} label={user.is_active ? actionsT("disable") : actionsT("enable")} tone={user.is_active ? "outline" : "primary"} confirm={user.is_active ? t("disableConfirm") : undefined} />
                   )}
                 </div>
-              </Card>
-            </li>
+                {!deactivation.allowed && !isSelf && (
+                  <span className="mt-1 block text-[length:var(--text-xs)] text-muted">
+                    {deactivation.reason === "cannotModifySuperadmin" ? t("cannotModifySuperadmin") : deactivation.reason === "lastSuperadmin" ? t("lastSuperadmin") : t("cannotModify")}
+                  </span>
+                )}
+              </Td>
+            </tr>
           );
         })}
-      </ul>
+          </Table>
+          <AdminPagination basePath="/admin/users" pagination={users} searchParams={{}} />
+        </>
+      )}
     </>
   );
 }

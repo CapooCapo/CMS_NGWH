@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { isPrivileged, type AdminRole } from "@/server/auth/permissions";
 
 /**
@@ -13,20 +14,21 @@ import { isPrivileged, type AdminRole } from "@/server/auth/permissions";
  */
 const ITEMS: {
   href: string;
-  label: string;
+  labelKey: string;
   roles: readonly AdminRole[] | null;
 }[] = [
-  { href: "/admin/dashboard", label: "Dashboard", roles: null },
-  { href: "/admin/registrations", label: "Registrations", roles: ["editor"] },
-  { href: "/admin/clubs", label: "Clubs", roles: ["editor"] },
-  { href: "/admin/seasons", label: "Seasons", roles: ["editor", "operator"] },
-  { href: "/admin/matches", label: "Matches & Scoreboard", roles: ["editor", "operator"] },
-  { href: "/admin/contact", label: "Contact inbox", roles: ["editor"] },
-  { href: "/admin/users", label: "Staff accounts", roles: [] },
+  { href: "/admin/dashboard", labelKey: "dashboard", roles: null },
+  { href: "/admin/registrations", labelKey: "registrations", roles: ["editor"] },
+  { href: "/admin/clubs", labelKey: "clubs", roles: ["editor"] },
+  { href: "/admin/seasons", labelKey: "seasons", roles: ["editor", "operator"] },
+  { href: "/admin/matches", labelKey: "matches", roles: ["editor", "operator"] },
+  { href: "/admin/contact", labelKey: "contact", roles: ["editor"] },
+  { href: "/admin/users", labelKey: "users", roles: [] },
 ];
 
 export function AdminNav({ role }: { role: AdminRole }) {
   const pathname = usePathname();
+  const t = useTranslations("admin.nav");
 
   /*
    * `superadmin` and `admin` see every section. Other roles see the sections
@@ -43,7 +45,10 @@ export function AdminNav({ role }: { role: AdminRole }) {
   });
 
   return (
-    <nav aria-label="Admin" className="px-2 pb-2 lg:mt-2 lg:pb-0">
+    <nav
+      aria-label={t("label")}
+      className="px-2 pb-2 lg:mt-2 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pb-0"
+    >
       <ul className="flex gap-1 overflow-x-auto lg:flex-col lg:overflow-visible">
         {visible.map((item) => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -62,7 +67,7 @@ export function AdminNav({ role }: { role: AdminRole }) {
                     : "text-white/70 hover:bg-white/8 hover:text-white"
                 }`}
               >
-                {item.label}
+                {t(item.labelKey)}
               </Link>
             </li>
           );

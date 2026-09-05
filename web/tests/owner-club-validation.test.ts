@@ -42,3 +42,16 @@ test("empty optional social-link values remain empty", () => {
   });
   assert.deepEqual(parsed.socialLinks, {});
 });
+
+test("an owner form payload may omit achievements", () => {
+  const { achievementsEn, achievementsVi } = parseOwnerClub({
+    name: "Validation Club",
+    province: "Testville",
+    socialLinks: {},
+  });
+
+  // The owner form deliberately has no achievement controls. The route keeps
+  // the stored values when these omitted fields parse as null.
+  assert.equal(achievementsEn, null);
+  assert.equal(achievementsVi, null);
+});

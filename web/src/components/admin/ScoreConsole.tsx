@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { Badge, Button, Card, Eyebrow, LiveBadge } from "@/components/ui";
 import type { MatchStatus, MatchWithContext } from "@/server/repositories/types";
 
@@ -17,6 +18,9 @@ type ConfirmedMatch = Pick<
  * without showing a score PostgreSQL has not confirmed.
  */
 export function ScoreConsole({ match }: { match: MatchWithContext }) {
+  const locale = useLocale();
+  const t = useTranslations("admin.score");
+  const statusT = useTranslations("admin.status");
   const [home, setHome] = useState(match.home_score);
   const [away, setAway] = useState(match.away_score);
   const [homeFouls, setHomeFouls] = useState(match.home_fouls);
@@ -44,7 +48,12 @@ export function ScoreConsole({ match }: { match: MatchWithContext }) {
     setStatus(next.status);
     setPeriod(next.period ?? "");
     setConfirmed(next);
-    setSavedAt(new Date().toLocaleTimeString());
+    setSavedAt(
+      new Intl.DateTimeFormat(locale === "vi" ? "vi-VN" : "en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date())
+    );
   }
 
   function adjust(team: "home" | "away", kind: "score" | "foul", delta: -3 | -2 | -1 | 1 | 2 | 3) {
@@ -64,16 +73,16 @@ export function ScoreConsole({ match }: { match: MatchWithContext }) {
         if (!response.ok || !data.match) {
           setError(
             data.error === "forbidden"
-              ? "Your role cannot update scores."
+              ? t("forbidden")
               : data.error === "scoreOutOfRange"
-                ? `${kind === "foul" ? "Fouls" : "Scores"} cannot go below zero.`
-                : `The ${kind === "foul" ? "foul" : "score"} could not be saved.`
+                ? t("belowZero", { kind: t(kind === "foul" ? "fouls" : "scores") })
+                : t("saveFailed", { kind: t(kind) })
           );
           return;
         }
         applyConfirmed(data.match);
       })
-      .catch(() => setError("The score could not be saved."))
+      .catch(() => setError(t("saveFailed", { kind: t("score") })))
       .finally(() => setQueuedAdjustments((count) => Math.max(0, count - 1)));
   }
 
@@ -96,12 +105,16 @@ export function ScoreConsole({ match }: { match: MatchWithContext }) {
         match?: MatchWithContext;
       };
       if (!response.ok || !data.match) {
-        setError(data.error === "forbidden" ? "Your role cannot update scores." : "The score could not be saved.");
+        setError(
+          data.error === "forbidden"
+            ? t("forbidden")
+            : t("saveFailed", { kind: t("score") })
+        );
         return;
       }
       applyConfirmed(data.match);
     } catch {
-      setError("The score could not be saved.");
+      setError(t("saveFailed", { kind: t("score") }));
     } finally {
       setPendingSave(false);
     }
@@ -120,7 +133,7 @@ export function ScoreConsole({ match }: { match: MatchWithContext }) {
               size="sm"
               disabled={value + delta < 0 || pendingSave}
               onClick={() => adjust(team, "score", delta)}
-              aria-label={`Subtract ${Math.abs(delta)} from ${label}`}
+              aria-label={t("subtract", { count: Math.abs(delta), team: label })}
             >
               {delta}
             </Button>
@@ -138,7 +151,7 @@ export function ScoreConsole({ match }: { match: MatchWithContext }) {
               size="sm"
               disabled={pendingSave}
               onClick={() => adjust(team, "score", delta)}
-              aria-label={`Add ${delta} to ${label}`}
+              aria-label={t("add", { count: delta, team: label })}
             >
               +{delta}
             </Button>
@@ -146,14 +159,14 @@ export function ScoreConsole({ match }: { match: MatchWithContext }) {
         </div>
       </div>
       <div className="mt-3 flex items-center gap-2 text-[length:var(--text-xs)] text-ink-muted">
-        <span className="font-semibold text-white">Fouls: {fouls}</span>
+        <span className="font-semibold text-white">{t("fouls")}: {fouls}</span>
         <Button
           type="button"
           tone="onCourt"
           size="sm"
           disabled={fouls <= 0 || pendingSave}
           onClick={() => adjust(team, "foul", -1)}
-          aria-label={`Subtract 1 foul from ${label}`}
+          aria-label={t("subtractFoul", { team: label })}
         >
           −
         </Button>
@@ -163,7 +176,7 @@ export function ScoreConsole({ match }: { match: MatchWithContext }) {
           size="sm"
           disabled={pendingSave}
           onClick={() => adjust(team, "foul", 1)}
-          aria-label={`Add 1 foul to ${label}`}
+          aria-label={t("addFoul", { team: label })}
         >
           +
         </Button>
@@ -175,12 +188,12 @@ export function ScoreConsole({ match }: { match: MatchWithContext }) {
     <Card variant="panel" className="p-4 sm:p-5">
       <div className="mb-4 flex flex-wrap items-center gap-2.5">
         <h3 className="min-w-0 flex-1 truncate text-[length:var(--text-base)] font-bold">
-          {match.home_team_name} <span className="text-ink-muted">vs</span>{" "}
+          {match.home_team_name} <span className="text-ink-muted">{t("versus")}</span>{" "}
           {match.away_team_name}
         </h3>
-        {status === "live" ? <LiveBadge label="Live" /> : <Badge tone="neutral">{status}</Badge>}
-        {queuedAdjustments > 0 && <Badge tone="accent">Saving score…</Badge>}
-        {dirty && <Badge tone="warning">Unsaved</Badge>}
+        {status === "live" ? <LiveBadge label={statusT("live")} /> : <Badge tone="neutral">{statusT(status)}</Badge>}
+        {queuedAdjustments > 0 && <Badge tone="accent">{t("savingScore")}</Badge>}
+        {dirty && <Badge tone="warning">{statusT("unsaved")}</Badge>}
       </div>
 
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
@@ -191,7 +204,7 @@ export function ScoreConsole({ match }: { match: MatchWithContext }) {
       <div className="mt-5 flex flex-wrap items-end gap-3 border-t border-ink-border pt-4">
         <div>
           <label htmlFor={`status-${match.id}`} className="mb-1.5 block">
-            <Eyebrow tone="muted" className="!text-ink-muted">Status</Eyebrow>
+            <Eyebrow tone="muted" className="!text-ink-muted">{t("status")}</Eyebrow>
           </label>
           <select
             id={`status-${match.id}`}
@@ -200,28 +213,28 @@ export function ScoreConsole({ match }: { match: MatchWithContext }) {
             onChange={(event) => setStatus(event.target.value as MatchStatus)}
             className="h-10 rounded-[var(--radius-md)] border border-ink-border bg-ink-raised px-3 text-[length:var(--text-sm)] text-white focus:border-accent focus:outline-none disabled:opacity-55"
           >
-            {STATUSES.map((value) => <option key={value} value={value} className="text-foreground">{value}</option>)}
+            {STATUSES.map((value) => <option key={value} value={value} className="text-foreground">{statusT(value)}</option>)}
           </select>
         </div>
         <div>
           <label htmlFor={`period-${match.id}`} className="mb-1.5 block">
-            <Eyebrow tone="muted" className="!text-ink-muted">Period</Eyebrow>
+            <Eyebrow tone="muted" className="!text-ink-muted">{t("period")}</Eyebrow>
           </label>
           <input
             id={`period-${match.id}`}
             value={period}
             disabled={queuedAdjustments > 0}
             onChange={(event) => setPeriod(event.target.value)}
-            placeholder="Q1"
+            placeholder={t("periodPlaceholder")}
             maxLength={20}
             className="h-10 w-24 rounded-[var(--radius-md)] border border-ink-border bg-ink-raised px-3 text-[length:var(--text-sm)] text-white placeholder:text-ink-muted focus:border-accent focus:outline-none disabled:opacity-55"
           />
         </div>
-        <Button tone="accent" onClick={save} disabled={!dirty || queuedAdjustments > 0} loading={pendingSave} loadingLabel="Saving">
-          Save
+        <Button tone="accent" onClick={save} disabled={!dirty || queuedAdjustments > 0} loading={pendingSave} loadingLabel={t("saving")}>
+          {t("save")}
         </Button>
         {savedAt && !dirty && (
-          <span className="text-[length:var(--text-xs)] text-ink-muted" aria-live="polite">Saved {savedAt}</span>
+          <span className="text-[length:var(--text-xs)] text-ink-muted" aria-live="polite">{t("saved", { time: savedAt })}</span>
         )}
       </div>
 

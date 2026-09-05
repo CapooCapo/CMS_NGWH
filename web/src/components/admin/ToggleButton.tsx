@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Button, type ButtonTone } from "@/components/ui";
 
@@ -29,6 +30,7 @@ export function ToggleButton({
   confirm?: string;
 }) {
   const router = useRouter();
+  const t = useTranslations("errors");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,16 +57,16 @@ export function ToggleButton({
               };
               setError(
                 data.error === "forbidden"
-                  ? "Not permitted for your role."
+                  ? t("forbidden")
                   : data.error === "cannotModifySelf"
-                    ? "You cannot change your own account."
-                    : "That change could not be saved."
+                    ? t("cannotModifySelf")
+                    : t("unexpected")
               );
               return;
             }
             router.refresh();
           } catch {
-            setError("That change could not be saved.");
+            setError(t("unexpected"));
           } finally {
             setPending(false);
           }

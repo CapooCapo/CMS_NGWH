@@ -1,5 +1,10 @@
 import "server-only";
 import { query, queryOne, transaction } from "@/server/db/pool";
+import {
+  ADMIN_PAGE_SIZE,
+  resolvePagination,
+  type PaginatedResult,
+} from "@/lib/pagination";
 import type { AdminRole } from "@/server/auth/permissions";
 
 export type AdminUser = {
@@ -37,6 +42,32 @@ export function listAdminUsers(): Promise<AdminUser[]> {
                  ELSE 4
                END, username`
   );
+}
+
+export async function listAdminUsersPage(
+  requestedPage: number
+): Promise<PaginatedResult<AdminUser>> {
+  const totalRow = await queryOne<{ count: string }>(
+    "SELECT COUNT(*)::text AS count FROM admin_users"
+  );
+  const pagination = resolvePagination(
+    requestedPage,
+    Number(totalRow?.count ?? 0),
+    ADMIN_PAGE_SIZE
+  );
+  const rows = await query<AdminUser>(
+    `SELECT ${COLUMNS} FROM admin_users
+      ORDER BY CASE role
+                 WHEN 'superadmin' THEN 0
+                 WHEN 'admin' THEN 1
+                 WHEN 'editor' THEN 2
+                 WHEN 'operator' THEN 3
+                 ELSE 4
+               END, username, id
+      LIMIT $1 OFFSET $2`,
+    [pagination.pageSize, pagination.offset]
+  );
+  return { ...pagination, rows };
 }
 
 export function createAdminUser(input: {

@@ -39,6 +39,11 @@ export async function PATCH(request: Request) {
       ...edits,
       slug: guard.club.slug,
       isApproved: guard.club.is_approved,
+      // Achievements are intentionally not editable from the owner form.
+      // Preserve both stored locale representations when the other profile
+      // fields are saved.
+      achievementsEn: guard.club.achievements_en,
+      achievementsVi: guard.club.achievements_vi,
     });
     return ok({ club });
   } catch (error) {
