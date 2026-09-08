@@ -18,7 +18,7 @@ export const SITE_NAME = "NextGen Women Hoops";
 export const SITE_NAME_SHORT = "NG Women Hoops";
 export const SITE_TAGLINE = "Where Tomorrow's Legends Rise";
 
-const FALLBACK_ORIGIN = "http://localhost:3000";
+const FALLBACK_ORIGIN = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
 /** Absolute origin used for metadataBase, canonicals, sitemap and robots. */
 export function siteOrigin(): string {

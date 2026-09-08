@@ -7,20 +7,44 @@ import {
   listAdminAuditLogs,
 } from "../src/server/repositories/adminAuditLogs";
 import { auditedAdminMutation } from "../src/server/security/adminAudit";
+import {
+  adjustLiveMatch,
+  scoreAuditMetadata,
+  updateLiveMatch,
+  updateLiveScore,
+} from "../src/server/services/liveMatchUpdates";
+import type { MatchWithContext } from "../src/server/repositories/types";
 
 const TAG = `test-audit-${process.pid}`;
 let actorId: number | null = null;
+let scoreSeasonId: number | null = null;
+let scoreMatchId: number | null = null;
 const originalTrustProxy = process.env.TRUST_PROXY_X_FORWARDED_FOR;
 
 before(async () => {
   process.env.TRUST_PROXY_X_FORWARDED_FOR = "true";
   const actor = await queryOne<{ id: number }>("SELECT id FROM admin_users ORDER BY id LIMIT 1");
   actorId = actor?.id ?? null;
+  if (!actorId) return;
+  const [season] = await query<{ id: number }>(
+    `INSERT INTO seasons (slug, name_en, name_vi, status)
+     VALUES ($1, 'Score audit test', 'Score audit test', 'active') RETURNING id`,
+    [`${TAG}-scores`]
+  );
+  scoreSeasonId = season.id;
+  const [match] = await query<{ id: number }>(
+    `INSERT INTO matches (season_id, home_team_name, away_team_name, scheduled_at,
+       status, home_score, away_score)
+     VALUES ($1, 'Home', 'Away', now(), 'live', 1, 0) RETURNING id`,
+    [scoreSeasonId]
+  );
+  scoreMatchId = match.id;
 });
 
 after(async () => {
   if (originalTrustProxy === undefined) delete process.env.TRUST_PROXY_X_FORWARDED_FOR;
   else process.env.TRUST_PROXY_X_FORWARDED_FOR = originalTrustProxy;
+  if (scoreSeasonId) await query("DELETE FROM seasons WHERE id = $1", [scoreSeasonId]);
   const { pool } = await import("../src/server/db/pool");
   await pool.end();
 });
@@ -236,5 +260,275 @@ test("score audit entries receive a default ISO creation time", async (t) => {
     assert.ok(scoreAudit);
     assert.match(scoreAudit.createdAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     assert.ok(!Number.isNaN(new Date(scoreAudit.createdAt).getTime()));
+  });
+});
+
+function scoreAuditInput(
+  before: Parameters<typeof scoreAuditMetadata>[0],
+  after: Parameters<typeof scoreAuditMetadata>[1],
+  includeUnchangedScore = false
+) {
+  return {
+    actorId: actorId!,
+    action: "match.score.update",
+    resourceType: "match",
+    resourceId: scoreMatchId!,
+    metadata: scoreAuditMetadata(before, after, { includeUnchangedScore }) ?? {},
+  };
+}
+
+async function auditRows() {
+  return query<{
+    metadata: {
+      changedFields?: string[];
+      before?: Record<string, number | string>;
+      after?: Record<string, number | string>;
+    };
+  }>(
+    `SELECT metadata FROM admin_audit_logs
+     WHERE action = 'match.score.update' AND resource_id = $1 ORDER BY id ASC`,
+    [String(scoreMatchId)]
+  );
+}
+
+type ScoreAdjustment = Awaited<ReturnType<typeof adjustLiveMatch>>;
+type SuccessfulScoreAdjustment = ScoreAdjustment & {
+  match: MatchWithContext;
+  before: Parameters<typeof scoreAuditMetadata>[0];
+  after: Parameters<typeof scoreAuditMetadata>[1];
+};
+
+function hasCommittedMatch(update: ScoreAdjustment): update is SuccessfulScoreAdjustment {
+  return update.match !== null;
+}
+
+function adjustmentAuditInput(update: ScoreAdjustment) {
+  return hasCommittedMatch(update)
+    ? scoreAuditInput(update.before, update.after)
+    : {
+        actorId: actorId!,
+        action: "match.score.update",
+        resourceType: "match",
+        resourceId: scoreMatchId!,
+        metadata: {},
+      };
+}
+
+test("direct score save records the committed 1-0 to 2-0 transition", async (t) => {
+  if (!actorId || !scoreMatchId) return t.skip("no admin fixture in configured database");
+  await withRollback(async () => {
+    const update = await auditedAdminMutation(
+      request("198.51.100.60"),
+      (result) => scoreAuditInput(result!.before, result!.after, true),
+      () => updateLiveScore(scoreMatchId!, 2, 0, "live", null),
+      Boolean
+    );
+    assert.ok(update);
+    assert.deepEqual(update.before, {
+      homeScore: 1,
+      awayScore: 0,
+      homeFouls: 0,
+      awayFouls: 0,
+      status: "live",
+    });
+    assert.deepEqual(update.after, {
+      homeScore: 2,
+      awayScore: 0,
+      homeFouls: 0,
+      awayFouls: 0,
+      status: "live",
+    });
+    const [audit] = await auditRows();
+    assert.deepEqual(audit.metadata, {
+      changedFields: ["homeScore"],
+      before: { homeScore: 1, awayScore: 0 },
+      after: { homeScore: 2, awayScore: 0 },
+    });
+    const logs = await listAdminAuditLogs(1, { action: "match.score.update" }, 50);
+    const log = logs.rows.find((row) => row.resourceId === String(scoreMatchId));
+    assert.deepEqual(log?.metadata, audit.metadata);
+    assert.ok(log?.createdAt);
+    assert.equal(log?.actorId, actorId);
+    assert.equal(log?.clientIp, "198.51.100.60");
+  });
+});
+
+test("away score adjustment records the changed side and complete score transition", async (t) => {
+  if (!actorId || !scoreMatchId) return t.skip("no admin fixture in configured database");
+  await withRollback(async () => {
+    const update = await auditedAdminMutation(
+      request(),
+      adjustmentAuditInput,
+      () => adjustLiveMatch(scoreMatchId!, "away", "score", 2),
+      (result) => Boolean(result.match)
+    );
+    if (!hasCommittedMatch(update)) assert.fail("score update was unexpectedly rejected");
+    assert.deepEqual(update.before, {
+      homeScore: 1,
+      awayScore: 0,
+      homeFouls: 0,
+      awayFouls: 0,
+      status: "live",
+    });
+    assert.deepEqual(update.after, {
+      homeScore: 1,
+      awayScore: 2,
+      homeFouls: 0,
+      awayFouls: 0,
+      status: "live",
+    });
+    const [audit] = await auditRows();
+    assert.deepEqual(audit.metadata, {
+      changedFields: ["awayScore"],
+      before: { homeScore: 1, awayScore: 0 },
+      after: { homeScore: 1, awayScore: 2 },
+    });
+  });
+});
+
+test("full match result updates retain score and status transitions in the existing match.update audit", async (t) => {
+  if (!actorId || !scoreMatchId || !scoreSeasonId) return t.skip("no admin fixture in configured database");
+  await withRollback(async () => {
+    const update = await auditedAdminMutation(
+      request(),
+      (result) => ({
+        actorId: actorId!,
+        action: "match.update",
+        resourceType: "match",
+        resourceId: scoreMatchId!,
+        metadata: {
+          changed: ["homeScore", "awayScore", "status"],
+          ...(result ? scoreAuditMetadata(result.before, result.after) ?? {} : {}),
+        },
+      }),
+      () => updateLiveMatch(scoreMatchId!, {
+        seasonId: scoreSeasonId!,
+        homeClubId: null,
+        awayClubId: null,
+        homeTeamName: "Home",
+        awayTeamName: "Away",
+        venue: null,
+        scheduledAt: new Date("2030-01-01T10:00:00Z"),
+        status: "completed",
+        homeScore: 2,
+        awayScore: 1,
+        period: null,
+      }),
+      Boolean
+    );
+    assert.ok(update);
+    const [audit] = await query<{
+      metadata: Record<string, unknown>;
+    }>(
+      `SELECT metadata FROM admin_audit_logs
+       WHERE action = 'match.update' AND resource_id = $1 ORDER BY id DESC LIMIT 1`,
+      [String(scoreMatchId)]
+    );
+    assert.deepEqual(audit.metadata, {
+      changed: ["homeScore", "awayScore", "status"],
+      changedFields: ["homeScore", "awayScore", "status"],
+      before: { homeScore: 1, awayScore: 0, status: "live" },
+      after: { homeScore: 2, awayScore: 1, status: "completed" },
+    });
+  });
+});
+
+test("a rejected score mutation writes no audit row", async (t) => {
+  if (!actorId || !scoreMatchId) return t.skip("no admin fixture in configured database");
+  await withRollback(async () => {
+    const update = await auditedAdminMutation(
+      request(),
+      adjustmentAuditInput,
+      () => adjustLiveMatch(scoreMatchId!, "home", "foul", -1),
+      (result) => Boolean(result.match)
+    );
+    assert.deepEqual(update, { match: null, scoreRejected: true });
+    assert.equal((await auditRows()).length, 0);
+  });
+});
+
+test("an audit-insert failure rolls back a score mutation", async (t) => {
+  if (!scoreMatchId) return t.skip("no match fixture in configured database");
+  await assert.rejects(
+    auditedAdminMutation(
+      request(),
+      (result) => ({
+        actorId: -1,
+        action: "match.score.update",
+        resourceType: "match",
+        resourceId: scoreMatchId!,
+        metadata: result ? scoreAuditMetadata(result.before, result.after, { includeUnchangedScore: true }) ?? {} : {},
+      }),
+      () => updateLiveScore(scoreMatchId!, 2, 0, "live", null),
+      Boolean
+    )
+  );
+  const [match] = await query<{ home_score: number; away_score: number; live_revision: number }>(
+    "SELECT home_score, away_score, live_revision FROM matches WHERE id = $1",
+    [scoreMatchId]
+  );
+  assert.deepEqual(match, { home_score: 1, away_score: 0, live_revision: 0 });
+  assert.equal((await auditRows()).length, 0);
+});
+
+test("concurrent score adjustments audit each serialized database transition", async (t) => {
+  if (!actorId || !scoreMatchId) return t.skip("no admin fixture in configured database");
+  await withRollback(async () => {
+    const updates = await Promise.all(
+      [1, 1].map(() => auditedAdminMutation(
+        request(),
+        adjustmentAuditInput,
+        () => adjustLiveMatch(scoreMatchId!, "home", "score", 1),
+        (result) => Boolean(result.match)
+      ))
+    );
+    assert.ok(updates.every(hasCommittedMatch));
+    assert.deepEqual(updates.map((update) => update.after.homeScore).sort(), [2, 3]);
+    const rows = await auditRows();
+    assert.deepEqual(rows.map((row) => row.metadata), [
+      {
+        changedFields: ["homeScore"],
+        before: { homeScore: 1, awayScore: 0 },
+        after: { homeScore: 2, awayScore: 0 },
+      },
+      {
+        changedFields: ["homeScore"],
+        before: { homeScore: 2, awayScore: 0 },
+        after: { homeScore: 3, awayScore: 0 },
+      },
+    ]);
+  });
+});
+
+test("foul adjustment records only the changed foul count", async (t) => {
+  if (!actorId || !scoreMatchId) return t.skip("no admin fixture in configured database");
+  await withRollback(async () => {
+    const update = await auditedAdminMutation(
+      request(),
+      adjustmentAuditInput,
+      () => adjustLiveMatch(scoreMatchId!, "home", "foul", 1),
+      (result) => Boolean(result.match)
+    );
+    if (!hasCommittedMatch(update)) assert.fail("foul update was unexpectedly rejected");
+    assert.deepEqual(update.before, {
+      homeScore: 1,
+      awayScore: 0,
+      homeFouls: 0,
+      awayFouls: 0,
+      status: "live",
+    });
+    assert.deepEqual(update.after, {
+      homeScore: 1,
+      awayScore: 0,
+      homeFouls: 1,
+      awayFouls: 0,
+      status: "live",
+    });
+    const [audit] = await auditRows();
+    assert.deepEqual(audit.metadata, {
+      changedFields: ["homeFouls"],
+      before: { homeFouls: 0 },
+      after: { homeFouls: 1 },
+    });
   });
 });

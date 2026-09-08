@@ -633,7 +633,11 @@
       "ip": "IP",
       "metadata": "Siêu dữ liệu",
       "unknownIp": "Không xác định",
-      "noMetadata": "—"
+      "noMetadata": "—",
+      "score": "Tỷ số",
+      "homeFouls": "Lỗi đội nhà",
+      "awayFouls": "Lỗi đội khách",
+      "status": "Trạng thái"
     },
     "matches": {
       "title": "Trận đấu & bảng điểm",

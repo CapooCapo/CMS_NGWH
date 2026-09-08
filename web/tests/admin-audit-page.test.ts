@@ -33,7 +33,7 @@ test("audit page and navigation translations exist in every locale", () => {
     };
     assert.equal(typeof messages.admin?.meta?.auditLogs, "string");
     assert.equal(typeof messages.admin?.nav?.auditLogs, "string");
-    for (const key of ["title", "description", "tableCaption", "time", "actor", "action", "resource", "resourceId", "ip", "metadata"]) {
+    for (const key of ["title", "description", "tableCaption", "time", "actor", "action", "resource", "resourceId", "ip", "metadata", "score", "homeFouls", "awayFouls", "status"]) {
       assert.equal(typeof messages.admin?.auditLogs?.[key], "string", `${locale} missing auditLogs.${key}`);
     }
   }

@@ -3,7 +3,10 @@ import {
   deleteMatch,
   findMatchById,
 } from "@/server/repositories/matches";
-import { updateLiveMatch } from "@/server/services/liveMatchUpdates";
+import {
+  scoreAuditMetadata,
+  updateLiveMatch,
+} from "@/server/services/liveMatchUpdates";
 import { parseMatch } from "@/server/validation/admin";
 import { fail, notFound, ok, parseId } from "@/server/api/respond";
 import { readJson } from "@/server/validation/validate";
@@ -36,14 +39,23 @@ export async function PATCH(
   if (!id) return notFound();
   try {
     const input = parseMatch(await readJson(request));
-    const match = await auditedAdminMutation(
+    const result = await auditedAdminMutation(
       request,
-      { actorId: guard.admin.id, action: "match.update", resourceType: "match", resourceId: id, metadata: { changed: Object.keys(input) } },
+      (update) => ({
+        actorId: guard.admin.id,
+        action: "match.update",
+        resourceType: "match",
+        resourceId: id,
+        metadata: {
+          changed: Object.keys(input),
+          ...(update ? scoreAuditMetadata(update.before, update.after) ?? {} : {}),
+        },
+      }),
       () => updateLiveMatch(id, input),
       Boolean
     );
-    if (!match) return notFound();
-    return ok({ match });
+    if (!result) return notFound();
+    return ok({ match: result.match });
   } catch (error) {
     return fail("update match", error);
   }

@@ -51,3 +51,4 @@ next-env.d.ts
 .cache/
 *.pid
 *.pid.lock
+.codex

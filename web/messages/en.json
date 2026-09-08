@@ -633,7 +633,11 @@
       "ip": "IP",
       "metadata": "Metadata",
       "unknownIp": "Unknown",
-      "noMetadata": "—"
+      "noMetadata": "—",
+      "score": "Score",
+      "homeFouls": "Home fouls",
+      "awayFouls": "Away fouls",
+      "status": "Status"
     },
     "matches": {
       "title": "Matches & scoreboard",

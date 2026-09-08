@@ -7,12 +7,43 @@ import {
   type PaginatedResult,
 } from "@/lib/pagination";
 
+const MATCH_AUDIT_FIELDS = [
+  "homeScore",
+  "awayScore",
+  "homeFouls",
+  "awayFouls",
+  "status",
+] as const;
+const MATCH_AUDIT_STATUSES = new Set([
+  "scheduled",
+  "live",
+  "completed",
+  "postponed",
+  "cancelled",
+]);
+
+export type AdminAuditMatchState = {
+  homeScore?: number;
+  awayScore?: number;
+  homeFouls?: number;
+  awayFouls?: number;
+  status?: string;
+};
+type AdminAuditMetadataValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly string[]
+  | AdminAuditMatchState;
+export type AdminAuditMetadata = Record<string, AdminAuditMetadataValue>;
+
 export type AdminAuditInput = {
   actorId: number;
   action: string;
   resourceType: string;
   resourceId: string | number;
-  metadata?: Record<string, string | number | boolean | null | readonly string[]>;
+  metadata?: AdminAuditMetadata;
   ip: string | null;
 };
 
@@ -24,7 +55,7 @@ export type AdminAuditLog = {
   action: string;
   resourceType: string;
   resourceId: string;
-  metadata: Record<string, string | number | boolean | null | string[]>;
+  metadata: AdminAuditMetadata;
   clientIp: string | null;
   /** Absolute ISO-8601 UTC instant, safe for API consumers and `Date`. */
   createdAt: string;
@@ -67,11 +98,31 @@ function where(filters: AdminAuditFilters): { clause: string; params: unknown[] 
  * read normalization keeps future malformed or legacy rows from exposing a
  * nested request body, credential, or oversized value through the history UI.
  */
+function safeMatchState(value: unknown): AdminAuditMatchState | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const state: AdminAuditMatchState = {};
+  const input = value as Record<string, unknown>;
+  for (const field of MATCH_AUDIT_FIELDS) {
+    const item = input[field];
+    if (field === "status") {
+      if (typeof item === "string" && MATCH_AUDIT_STATUSES.has(item)) state.status = item;
+    } else if (typeof item === "number" && Number.isSafeInteger(item)) {
+      state[field] = item;
+    }
+  }
+  return Object.keys(state).length > 0 ? state : null;
+}
+
 function safeMetadata(value: unknown): AdminAuditLog["metadata"] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const safe: AdminAuditLog["metadata"] = {};
   for (const [key, item] of Object.entries(value as Record<string, unknown>).slice(0, 12)) {
     if (/(?:pass|token|secret|cookie|authorization|content|body)/i.test(key)) continue;
+    if (key === "before" || key === "after") {
+      const state = safeMatchState(item);
+      if (state) safe[key] = state;
+      continue;
+    }
     if (typeof item === "string") safe[key] = item.slice(0, 500);
     else if (typeof item === "number" || typeof item === "boolean" || item === null) safe[key] = item;
     else if (Array.isArray(item) && item.every((child) => typeof child === "string")) {

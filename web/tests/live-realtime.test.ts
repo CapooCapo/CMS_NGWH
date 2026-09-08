@@ -63,12 +63,26 @@ after(async () => {
 
 test("committed score updates increment revision and publish one match notification", async (t) => {
   const received = notificationsSupported ? notification() : null;
-  const match = await updateLiveScore(matchId, 44, 39, "live", "Q3");
-  assert.ok(match);
-  assert.equal(match.live_revision, 1);
-  assert.equal(match.home_score, 44);
-  assert.equal(match.home_fouls, 0);
-  assert.equal(match.away_fouls, 0);
+  const update = await updateLiveScore(matchId, 44, 39, "live", "Q3");
+  assert.ok(update);
+  assert.equal(update.match.live_revision, 1);
+  assert.equal(update.match.home_score, 44);
+  assert.equal(update.match.home_fouls, 0);
+  assert.equal(update.match.away_fouls, 0);
+  assert.deepEqual(update.before, {
+    homeScore: 0,
+    awayScore: 0,
+    homeFouls: 0,
+    awayFouls: 0,
+    status: "live",
+  });
+  assert.deepEqual(update.after, {
+    homeScore: 44,
+    awayScore: 39,
+    homeFouls: 0,
+    awayFouls: 0,
+    status: "live",
+  });
   if (!received) return t.skip("configured PostgreSQL endpoint does not forward LISTEN/NOTIFY");
   assert.deepEqual(await received, { matchId, revision: 1 });
 });

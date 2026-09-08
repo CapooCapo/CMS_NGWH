@@ -1,5 +1,9 @@
 import { requireRole } from "@/server/auth/guard";
-import { adjustLiveMatch, updateLiveScore } from "@/server/services/liveMatchUpdates";
+import {
+  adjustLiveMatch,
+  scoreAuditMetadata,
+  updateLiveScore,
+} from "@/server/services/liveMatchUpdates";
 import { parseScore, parseScoreAdjustment } from "@/server/validation/admin";
 import { fail, notFound, ok, parseId } from "@/server/api/respond";
 import { NextResponse } from "next/server";
@@ -28,7 +32,13 @@ export async function POST(
       const input = parseScoreAdjustment(body);
       const result = await auditedAdminMutation(
         request,
-        { actorId: guard.admin.id, action: "match.score.update", resourceType: "match", resourceId: id, metadata: { kind: input.kind, team: input.team } },
+        (update) => ({
+          actorId: guard.admin.id,
+          action: "match.score.update",
+          resourceType: "match",
+          resourceId: id,
+          metadata: update.match ? scoreAuditMetadata(update.before, update.after) ?? {} : {},
+        }),
         () => adjustLiveMatch(id, input.team, input.kind, input.delta),
         (update) => Boolean(update.match)
       );
@@ -39,9 +49,17 @@ export async function POST(
       return ok({ match: result.match });
     }
     const input = parseScore(body);
-    const match = await auditedAdminMutation(
+    const result = await auditedAdminMutation(
       request,
-      { actorId: guard.admin.id, action: "match.score.update", resourceType: "match", resourceId: id, metadata: { changed: ["homeScore", "awayScore", "status", "period"] } },
+      (update) => ({
+        actorId: guard.admin.id,
+        action: "match.score.update",
+        resourceType: "match",
+        resourceId: id,
+        metadata: update
+          ? scoreAuditMetadata(update.before, update.after, { includeUnchangedScore: true }) ?? {}
+          : {},
+      }),
       () => updateLiveScore(
         id,
         input.homeScore,
@@ -51,8 +69,8 @@ export async function POST(
       ),
       Boolean
     );
-    if (!match) return notFound();
-    return ok({ match });
+    if (!result) return notFound();
+    return ok({ match: result.match });
   } catch (error) {
     return fail("update score", error);
   }

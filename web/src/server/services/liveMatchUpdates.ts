@@ -2,6 +2,10 @@ import "server-only";
 import type { QueryResultRow } from "pg";
 import { transaction } from "@/server/db/pool";
 import type { MatchInput } from "@/server/repositories/matches";
+import type {
+  AdminAuditMatchState,
+  AdminAuditMetadata,
+} from "@/server/repositories/adminAuditLogs";
 import type { MatchStatus, MatchWithContext } from "@/server/repositories/types";
 
 export const LIVE_MATCH_CHANNEL = "ngwh_match_updates";
@@ -15,6 +19,33 @@ const CONTEXT_COLUMNS = `
   s.slug AS season_slug, s.name_en AS season_name_en, s.name_vi AS season_name_vi,
   hc.slug AS home_club_slug, ac.slug AS away_club_slug,
   hc.logo_url AS home_club_logo, ac.logo_url AS away_club_logo`;
+
+const BEFORE_STATE_COLUMNS = `
+  c.home_score AS before_home_score, c.away_score AS before_away_score,
+  c.home_fouls AS before_home_fouls, c.away_fouls AS before_away_fouls,
+  c.status AS before_status`;
+
+type MatchRowWithBefore = MatchWithContext & {
+  before_home_score: number;
+  before_away_score: number;
+  before_home_fouls: number;
+  before_away_fouls: number;
+  before_status: MatchStatus;
+};
+
+export type MatchAuditState = {
+  homeScore: number;
+  awayScore: number;
+  homeFouls: number;
+  awayFouls: number;
+  status: MatchStatus;
+};
+
+export type LiveMatchMutation = {
+  match: MatchWithContext;
+  before: MatchAuditState;
+  after: MatchAuditState;
+};
 
 async function notifyCommittedMatch(
   client: import("pg").PoolClient,
@@ -31,28 +62,97 @@ async function notifyCommittedMatch(
 async function updateAndPublish(
   sql: string,
   params: readonly unknown[]
-): Promise<MatchWithContext | null> {
+): Promise<LiveMatchMutation | null> {
   return transaction(async (client) => {
-    const result = await client.query<MatchWithContext & QueryResultRow>(sql, params as unknown[]);
-    const match = result.rows[0] ?? null;
-    if (match) await notifyCommittedMatch(client, match);
-    return match;
+    const result = await client.query<MatchRowWithBefore & QueryResultRow>(sql, params as unknown[]);
+    const row = result.rows[0] ?? null;
+    if (!row) return null;
+    const mutation: LiveMatchMutation = {
+      match: row,
+      before: {
+        homeScore: row.before_home_score,
+        awayScore: row.before_away_score,
+        homeFouls: row.before_home_fouls,
+        awayFouls: row.before_away_fouls,
+        status: row.before_status,
+      },
+      after: {
+        homeScore: row.home_score,
+        awayScore: row.away_score,
+        homeFouls: row.home_fouls,
+        awayFouls: row.away_fouls,
+        status: row.status,
+      },
+    };
+    await notifyCommittedMatch(client, mutation.match);
+    return mutation;
   });
+}
+
+/**
+ * Allowlisted score/result detail for an audit event. Score snapshots always
+ * contain both sides so a reader can understand the game state; foul-only
+ * updates contain only the changed foul count.
+ */
+export function scoreAuditMetadata(
+  before: MatchAuditState,
+  after: MatchAuditState,
+  { includeUnchangedScore = false }: { includeUnchangedScore?: boolean } = {}
+): AdminAuditMetadata | null {
+  const changedFields = [
+    ...(before.homeScore !== after.homeScore ? ["homeScore"] : []),
+    ...(before.awayScore !== after.awayScore ? ["awayScore"] : []),
+    ...(before.homeFouls !== after.homeFouls ? ["homeFouls"] : []),
+    ...(before.awayFouls !== after.awayFouls ? ["awayFouls"] : []),
+    ...(before.status !== after.status ? ["status"] : []),
+  ];
+  const scoreChanged =
+    before.homeScore !== after.homeScore || before.awayScore !== after.awayScore;
+  const foulChanged =
+    before.homeFouls !== after.homeFouls || before.awayFouls !== after.awayFouls;
+  const statusChanged = before.status !== after.status;
+  if (!scoreChanged && !foulChanged && !statusChanged && !includeUnchangedScore) return null;
+
+  const beforeMetadata: AdminAuditMatchState = {};
+  const afterMetadata: AdminAuditMatchState = {};
+  if (scoreChanged || includeUnchangedScore) {
+    beforeMetadata.homeScore = before.homeScore;
+    beforeMetadata.awayScore = before.awayScore;
+    afterMetadata.homeScore = after.homeScore;
+    afterMetadata.awayScore = after.awayScore;
+  }
+  if (before.homeFouls !== after.homeFouls) {
+    beforeMetadata.homeFouls = before.homeFouls;
+    afterMetadata.homeFouls = after.homeFouls;
+  }
+  if (before.awayFouls !== after.awayFouls) {
+    beforeMetadata.awayFouls = before.awayFouls;
+    afterMetadata.awayFouls = after.awayFouls;
+  }
+  if (statusChanged) {
+    beforeMetadata.status = before.status;
+    afterMetadata.status = after.status;
+  }
+  return { changedFields, before: beforeMetadata, after: afterMetadata };
 }
 
 /** Full fixture edits still publish when the public match representation changes. */
 export function updateLiveMatch(id: number, input: MatchInput) {
   return updateAndPublish(
-    `WITH u AS (
-       UPDATE matches SET season_id=$2, home_club_id=$3, away_club_id=$4,
+    `WITH current AS (
+       SELECT id, home_score, away_score, home_fouls, away_fouls, status
+       FROM matches WHERE id=$1 FOR UPDATE
+     ), u AS (
+       UPDATE matches AS m SET season_id=$2, home_club_id=$3, away_club_id=$4,
          home_team_name=$5, away_team_name=$6, venue=$7, scheduled_at=$8,
          status=$9, home_score=$10, away_score=$11, period=$12,
          live_revision = live_revision + 1
-       WHERE id=$1
-       RETURNING *
+       FROM current c WHERE m.id = c.id
+       RETURNING m.*
      )
-     SELECT ${CONTEXT_COLUMNS}
+     SELECT ${CONTEXT_COLUMNS}, ${BEFORE_STATE_COLUMNS}
        FROM u
+       JOIN current c ON c.id = u.id
        JOIN seasons s ON s.id = u.season_id
        LEFT JOIN clubs hc ON hc.id = u.home_club_id
        LEFT JOIN clubs ac ON ac.id = u.away_club_id`,
@@ -82,14 +182,18 @@ export function updateLiveScore(
   period: string | null
 ) {
   return updateAndPublish(
-    `WITH u AS (
-       UPDATE matches SET home_score=$2, away_score=$3, status=$4, period=$5,
+    `WITH current AS (
+       SELECT id, home_score, away_score, home_fouls, away_fouls, status
+       FROM matches WHERE id=$1 FOR UPDATE
+     ), u AS (
+       UPDATE matches AS m SET home_score=$2, away_score=$3, status=$4, period=$5,
          live_revision = live_revision + 1
-       WHERE id=$1
-       RETURNING *
+       FROM current c WHERE m.id = c.id
+       RETURNING m.*
      )
-     SELECT ${CONTEXT_COLUMNS}
+     SELECT ${CONTEXT_COLUMNS}, ${BEFORE_STATE_COLUMNS}
        FROM u
+       JOIN current c ON c.id = u.id
        JOIN seasons s ON s.id = u.season_id
        LEFT JOIN clubs hc ON hc.id = u.home_club_id
        LEFT JOIN clubs ac ON ac.id = u.away_club_id`,
@@ -116,24 +220,46 @@ export async function adjustLiveMatch(
       ? team === "home" ? "home_score" : "away_score"
       : team === "home" ? "home_fouls" : "away_fouls";
   return transaction(async (client) => {
-    const result = await client.query<MatchWithContext & QueryResultRow>(
-      `WITH u AS (
-         UPDATE matches SET ${column} = ${column} + $2,
+    const result = await client.query<MatchRowWithBefore & QueryResultRow>(
+      `WITH current AS (
+         SELECT id, home_score, away_score, home_fouls, away_fouls, status
+         FROM matches WHERE id=$1 FOR UPDATE
+       ), u AS (
+         UPDATE matches AS m SET ${column} = m.${column} + $2,
            live_revision = live_revision + 1
-         WHERE id=$1 AND ${column} + $2 >= 0
-         RETURNING *
+         FROM current c
+         WHERE m.id = c.id AND c.${column} + $2 >= 0
+         RETURNING m.*
        )
-       SELECT ${CONTEXT_COLUMNS}
+       SELECT ${CONTEXT_COLUMNS}, ${BEFORE_STATE_COLUMNS}
          FROM u
+         JOIN current c ON c.id = u.id
          JOIN seasons s ON s.id = u.season_id
          LEFT JOIN clubs hc ON hc.id = u.home_club_id
          LEFT JOIN clubs ac ON ac.id = u.away_club_id`,
       [id, delta]
     );
-    const match = result.rows[0] ?? null;
-    if (match) {
-      await notifyCommittedMatch(client, match);
-      return { match, scoreRejected: false };
+    const row = result.rows[0] ?? null;
+    if (row) {
+      const mutation: LiveMatchMutation = {
+        match: row,
+        before: {
+          homeScore: row.before_home_score,
+          awayScore: row.before_away_score,
+          homeFouls: row.before_home_fouls,
+          awayFouls: row.before_away_fouls,
+          status: row.before_status,
+        },
+        after: {
+          homeScore: row.home_score,
+          awayScore: row.away_score,
+          homeFouls: row.home_fouls,
+          awayFouls: row.away_fouls,
+          status: row.status,
+        },
+      };
+      await notifyCommittedMatch(client, mutation.match);
+      return { ...mutation, scoreRejected: false };
     }
     const exists = await client.query<{ exists: boolean }>(
       "SELECT EXISTS(SELECT 1 FROM matches WHERE id = $1) AS exists",
