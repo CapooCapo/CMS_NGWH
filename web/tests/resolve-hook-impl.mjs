@@ -30,7 +30,9 @@ export function resolve(specifier, context, next) {
   if (specifier.startsWith("@/")) {
     const resolved = withExtension(path.join(SRC, specifier.slice(2)));
     if (resolved) {
-      return { url: pathToFileURL(resolved).href, shortCircuit: true };
+      // Preserve the rest of the hook chain so tsx can load and transpile the
+      // resolved TypeScript module.
+      return next(pathToFileURL(resolved).href, context);
     }
   }
 
@@ -41,7 +43,9 @@ export function resolve(specifier, context, next) {
       : process.cwd();
     const resolved = withExtension(path.resolve(parentPath, specifier));
     if (resolved) {
-      return { url: pathToFileURL(resolved).href, shortCircuit: true };
+      // Preserve the rest of the hook chain so tsx can load and transpile the
+      // resolved TypeScript module.
+      return next(pathToFileURL(resolved).href, context);
     }
   }
 
