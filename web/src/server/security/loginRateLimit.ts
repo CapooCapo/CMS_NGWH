@@ -1,15 +1,11 @@
 import "server-only";
 import { createHmac } from "node:crypto";
 import { isIP } from "node:net";
+import type { PoolClient } from "pg";
 
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_FAILURES = 5;
-const UPSTASH_TIMEOUT_MS = 5_000;
-const LOCK_LEVEL_TTL_MS = WINDOW_MS;
 const LOCK_DURATIONS_MS = [30_000, 60_000, 120_000, 300_000] as const;
-
-type UpstashReply = { result?: unknown; error?: string };
-type FetchLike = typeof fetch;
 
 export class LoginRateLimitUnavailable extends Error {
   constructor() {
@@ -17,308 +13,149 @@ export class LoginRateLimitUnavailable extends Error {
   }
 }
 
-export type LoginRateLimit = {
-  locked: boolean;
-  retryAfterSeconds: number;
+export type LoginRateLimit = { locked: boolean; retryAfterSeconds: number };
+type Identity = { hash: string; scope: "account" | "trusted_ip" };
+type State = {
+  key_hash: string;
+  failure_count: number;
+  lock_level: number;
+  locked_until: Date | null;
+  failure_expires_at: Date | null;
+  level_expires_at: Date | null;
 };
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new LoginRateLimitUnavailable();
-  return value;
-}
-
-function keyPart(value: string): string {
-  return createHmac("sha256", required("LOGIN_RATE_LIMIT_SECRET"))
-    .update(value)
-    .digest("base64url");
-}
-
-/** Identity keys must match the case-insensitive staff-account lookup. */
 export function normalizedLoginAccount(account: string): string {
   return account.trim().toLowerCase();
 }
 
-function keys(ip: string | null, account: string) {
-  const accountKey = `login-limit:account:${keyPart(account)}`;
-  // A missing forwarding header is not an address. In particular, never put
-  // every direct request into a shared "unknown" bucket.
-  return ip ? [`login-limit:ip:${keyPart(ip)}`, accountKey] : [accountKey];
-}
-
-async function command(args: (string | number)[], fetcher: FetchLike = fetch): Promise<unknown> {
-  const url = required("UPSTASH_REDIS_REST_URL");
-  const token = required("UPSTASH_REDIS_REST_TOKEN");
-  let response: Response;
-  try {
-    response = await fetcher(url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(args),
-      cache: "no-store",
-      signal: AbortSignal.timeout(UPSTASH_TIMEOUT_MS),
-    });
-  } catch {
-    throw new LoginRateLimitUnavailable();
-  }
-  let body: UpstashReply;
-  try {
-    body = (await response.json()) as UpstashReply;
-  } catch {
-    throw new LoginRateLimitUnavailable();
-  }
-  if (!response.ok || body.error) throw new LoginRateLimitUnavailable();
-  return body.result;
-}
-
-/*
- * Each HMAC-obscured identity key keeps three independent Redis values:
- *
- *   <key>          failure count for the current cycle
- *   <key>:lock     short-lived lock key (its PTTL is the exact retry time)
- *   <key>:level    progressive lock level, retained for a bounded window
- *
- * A separate lock key is important: a request rejected while locked only
- * reads PTTL, so it can never extend the lock. Keeping the level separate
- * lets the next six-failure cycle advance from 30 -> 60 -> 120 -> 300s.
- *
- * The legacy failure-count key is deliberately retained as the base key.
- * Existing pre-deploy locks remain honored by CHECK_SCRIPT until their old
- * TTL expires, rather than being silently cleared during deployment.
- */
-const CHECK_SCRIPT = `
-local retry = 0
-local max_failures = tonumber(ARGV[1])
-for i, key in ipairs(KEYS) do
-  local lock_ttl = redis.call('PTTL', key .. ':lock')
-  if lock_ttl > retry then retry = lock_ttl end
-
-  -- The previous limiter stored a count directly at <key>. Honour an active
-  -- legacy lock during rollout; new locks always use <key>:lock.
-  if lock_ttl <= 0 then
-    local legacy_count = tonumber(redis.call('GET', key)) or 0
-    if legacy_count > max_failures then
-      local legacy_ttl = redis.call('PTTL', key)
-      if legacy_ttl > retry then retry = legacy_ttl end
-    end
-  end
-end
-return retry`;
-
-const RECORD_SCRIPT = `
-local retry = 0
-local max_failures = tonumber(ARGV[1])
-local failure_window = tonumber(ARGV[2])
-local level_ttl = tonumber(ARGV[3])
-
-for i, key in ipairs(KEYS) do
-  local lock_key = key .. ':lock'
-  local level_key = key .. ':level'
-  local lock_ttl = redis.call('PTTL', lock_key)
-
-  -- This also protects against a race between check() and recordFailure().
-  -- Never increment a counter or refresh a TTL for an already locked key.
-  if lock_ttl > 0 then
-    if lock_ttl > retry then retry = lock_ttl end
-  else
-    local count = redis.call('INCR', key)
-    if count == 1 then redis.call('PEXPIRE', key, failure_window) end
-
-    if count > max_failures then
-      local level = redis.call('INCR', level_key)
-      if level > 4 then
-        level = 4
-        redis.call('SET', level_key, level)
-      end
-      redis.call('PEXPIRE', level_key, level_ttl)
-
-      local duration = tonumber(ARGV[3 + level])
-      redis.call('PSETEX', lock_key, duration, '1')
-      -- A fresh cycle begins only after this lock naturally expires.
-      redis.call('DEL', key)
-
-      local actual_ttl = redis.call('PTTL', lock_key)
-      if actual_ttl > retry then retry = actual_ttl end
-    end
-  end
-end
-return retry`;
-
-function resultToLimit(result: unknown): LoginRateLimit {
-  const ttl = typeof result === "number" ? result : Number(result);
-  if (!Number.isFinite(ttl) || ttl <= 0) return { locked: false, retryAfterSeconds: 0 };
-  return { locked: true, retryAfterSeconds: Math.max(1, Math.ceil(ttl / 1000)) };
+function identities(ip: string | null, account: string): Identity[] {
+  const secret = process.env.LOGIN_RATE_LIMIT_SECRET;
+  if (!secret?.trim()) throw new LoginRateLimitUnavailable();
+  const digest = (value: string) => createHmac("sha256", secret).update(value).digest("base64url");
+  // Preserve established HMAC identities, with separate account/IP prefixes.
+  return [
+    { hash: `login-limit:account:${digest(normalizedLoginAccount(account))}`, scope: "account" as const },
+    ...(ip ? [{ hash: `login-limit:ip:${digest(ip)}`, scope: "trusted_ip" as const }] : []),
+  ].sort((a, b) => a.hash.localeCompare(b.hash));
 }
 
 export function clientIp(request: Request): string | null {
-  // Only a deployment that has a proxy configured to overwrite XFF may opt in
-  // to trusting it. This also avoids treating development-server loopback
-  // forwarding headers as a shared client identity.
   if (process.env.TRUST_PROXY_X_FORWARDED_FOR !== "true") return null;
-  // Never trust a secondary client-controlled forwarding header as a fallback.
-  // Invalid values are treated exactly like a missing header, so they cannot
-  // become Redis or PostgreSQL keys.
   const candidate = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   return candidate && isIP(candidate) ? candidate : null;
 }
 
-export interface LoginRateLimitStore {
-  check(ip: string | null, account: string): Promise<LoginRateLimit>;
-  recordFailure(ip: string | null, account: string): Promise<LoginRateLimit>;
-  clearAccount(account: string): Promise<void>;
-}
-
-class UpstashLoginRateLimitStore implements LoginRateLimitStore {
-  async check(ip: string | null, account: string): Promise<LoginRateLimit> {
-    const limitKeys = keys(ip, account);
-    const result = await command(["EVAL", CHECK_SCRIPT, limitKeys.length, ...limitKeys, MAX_FAILURES]);
-    return resultToLimit(result);
-  }
-
-  async recordFailure(ip: string | null, account: string): Promise<LoginRateLimit> {
-    const limitKeys = keys(ip, account);
-    const result = await command([
-      "EVAL",
-      RECORD_SCRIPT,
-      limitKeys.length,
-      ...limitKeys,
-      MAX_FAILURES,
-      WINDOW_MS,
-      LOCK_LEVEL_TTL_MS,
-      ...LOCK_DURATIONS_MS,
-    ]);
-    return resultToLimit(result);
-  }
-
-  async clearAccount(account: string): Promise<void> {
-    // Do not clear the IP bucket: a successful account must not reset an
-    // attacker’s aggregate failure history for that address. Account success
-    // resets only that account's failure cycle, active lock and progression.
-    const key = `login-limit:account:${keyPart(account)}`;
-    await command(["DEL", key, `${key}:lock`, `${key}:level`]);
+async function protectedOperation<T>(operation: "check" | "failure" | "reset", run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    // Driver messages may contain credentials or identities. Log no original
+    // exception, SQL parameters, key hashes or connection strings.
+    console.error("login rate limiter unavailable", {
+      operation,
+      reason: error instanceof LoginRateLimitUnavailable ? "missing_configuration" : "database_failure",
+    });
+    throw new LoginRateLimitUnavailable();
   }
 }
 
-type LocalFailure = {
-  failureCount: number;
-  failureExpiresAt: number;
-  lockLevel: number;
-  levelExpiresAt: number;
-  lockUntil: number;
-};
-
-/**
- * Development has no shared Redis service by default. Keep the same bounded
- * behavior locally instead of making every login fail, while production stays
- * fail-closed when its required Upstash configuration is unavailable.
- */
-class LocalLoginRateLimitStore implements LoginRateLimitStore {
-  private readonly failures = new Map<string, LocalFailure>();
-
-  private keys(ip: string | null, account: string): string[] {
-    return [...(ip ? [`ip:${ip}`] : []), `account:${account}`];
-  }
-
-  private state(key: string, now: number): LocalFailure {
-    const existing = this.failures.get(key);
-    const failure: LocalFailure = existing ?? {
-      failureCount: 0,
-      failureExpiresAt: 0,
-      lockLevel: 0,
-      levelExpiresAt: 0,
-      lockUntil: 0,
-    };
-    if (failure.failureExpiresAt <= now) failure.failureCount = 0;
-    if (failure.levelExpiresAt <= now) failure.lockLevel = 0;
-    this.failures.set(key, failure);
-    return failure;
-  }
-
-  private limit(keys: readonly string[], now: number): LoginRateLimit {
-    const locked = keys
-      .map((key) => this.state(key, now).lockUntil - now)
-      .filter((remaining) => remaining > 0);
-    if (locked.length === 0) return { locked: false, retryAfterSeconds: 0 };
-    return {
-      locked: true,
-      retryAfterSeconds: Math.max(1, Math.ceil(Math.max(...locked) / 1000)),
-    };
-  }
-
-  async check(ip: string | null, account: string): Promise<LoginRateLimit> {
-    const now = Date.now();
-    return this.limit(this.keys(ip, account), now);
-  }
-
-  async recordFailure(ip: string | null, account: string): Promise<LoginRateLimit> {
-    const now = Date.now();
-    const keys = this.keys(ip, account);
-    for (const key of keys) {
-      const failure = this.state(key, now);
-      if (failure.lockUntil > now) continue;
-      if (failure.lockUntil > 0) {
-        failure.lockUntil = 0;
-        failure.failureCount = 0;
-      }
-      failure.failureCount += 1;
-      if (failure.failureCount === 1) failure.failureExpiresAt = now + WINDOW_MS;
-      if (failure.failureCount > MAX_FAILURES) {
-        failure.lockLevel = Math.min(failure.lockLevel + 1, LOCK_DURATIONS_MS.length);
-        failure.levelExpiresAt = now + LOCK_LEVEL_TTL_MS;
-        failure.lockUntil = now + LOCK_DURATIONS_MS[failure.lockLevel - 1];
-        failure.failureCount = 0;
-        failure.failureExpiresAt = 0;
-      }
-    }
-    return this.limit(keys, now);
-  }
-
-  async clearAccount(account: string): Promise<void> {
-    this.failures.delete(`account:${account}`);
-  }
+async function remaining(client: PoolClient, hashes: string[]): Promise<LoginRateLimit> {
+  const { rows } = await client.query<{ seconds: number }>(
+    `SELECT GREATEST(0, CEIL(EXTRACT(EPOCH FROM (MAX(locked_until) - clock_timestamp()))))::integer AS seconds
+       FROM login_rate_limits WHERE key_hash = ANY($1::text[])`,
+    [hashes]
+  );
+  const seconds = rows[0].seconds;
+  return { locked: seconds > 0, retryAfterSeconds: seconds };
 }
 
-let testStore: LoginRateLimitStore | undefined;
-const localStore = new LocalLoginRateLimitStore();
-
-/** Test-only dependency injection; production always uses the Upstash store. */
-export function setLoginRateLimitStoreForTests(store: LoginRateLimitStore | undefined): void {
-  testStore = store;
-}
-
-function store(): LoginRateLimitStore {
-  if (testStore) return testStore;
-  // A deployment must configure the shared limiter; silently falling back
-  // there would remove cross-instance protection during an outage.
-  return process.env.NODE_ENV === "production"
-    ? new UpstashLoginRateLimitStore()
-    : localStore;
+async function withDatabase<T>(run: (client: PoolClient) => Promise<T>): Promise<T> {
+  // Lazy loading also maps absent DB configuration to an opaque failure.
+  // Importing clientIp alone must not initialise a database pool.
+  const { transaction } = await import("@/server/db/pool");
+  return transaction(async (client) => {
+    await client.query("SET LOCAL statement_timeout = '5s'");
+    await client.query("SET LOCAL lock_timeout = '3s'");
+    return run(client);
+  });
 }
 
 export async function checkLoginLimit(ip: string | null, account: string): Promise<LoginRateLimit> {
-  return store().check(ip, account);
+  return protectedOperation("check", async () => {
+    const hashes = identities(ip, account).map((identity) => identity.hash);
+    // Read-only: never create rows or refresh expiry. Failure recording
+    // rechecks locks to close the check/password/record race.
+    return withDatabase((client) => remaining(client, hashes));
+  });
 }
 
-export async function recordFailedLogin(
-  ip: string | null,
-  account: string
-): Promise<LoginRateLimit> {
-  return store().recordFailure(ip, account);
+export async function recordFailedLogin(ip: string | null, account: string): Promise<LoginRateLimit> {
+  return protectedOperation("failure", async () => {
+    const keys = identities(ip, account);
+    const hashes = keys.map((key) => key.hash);
+    return withDatabase(async (client) => {
+      // Identical ordering for insertion and locking prevents deadlocks.
+      // ON CONFLICT waits for a concurrent first insertion to commit.
+      for (const key of keys) {
+        await client.query(
+          "INSERT INTO login_rate_limits (key_hash, scope) VALUES ($1, $2) ON CONFLICT (key_hash) DO NOTHING",
+          [key.hash, key.scope]
+        );
+      }
+      const { rows } = await client.query<State>(
+        `SELECT key_hash, failure_count, lock_level, locked_until, failure_expires_at, level_expires_at
+           FROM login_rate_limits WHERE key_hash = ANY($1::text[]) ORDER BY key_hash FOR UPDATE`,
+        [hashes]
+      );
+      if (rows.length !== keys.length) throw new Error("limiter state missing");
+      // NOW() precedes any lock wait. Use database wall time after row locks.
+      const { rows: clock } = await client.query<{ now: Date }>("SELECT clock_timestamp() AS now");
+      const now = clock[0].now;
+      const active = (expiry: Date | null) => expiry !== null && expiry.getTime() > now.getTime();
+      if (rows.some((row) => active(row.locked_until))) return remaining(client, hashes);
+
+      for (const row of rows) {
+        const count = (active(row.failure_expires_at) ? row.failure_count : 0) + 1;
+        let level = active(row.level_expires_at) ? row.lock_level : 0;
+        let lockedUntil: Date | null = null;
+        let failureExpiresAt = active(row.failure_expires_at) ? row.failure_expires_at : new Date(now.getTime() + WINDOW_MS);
+        let levelExpiresAt = active(row.level_expires_at) ? row.level_expires_at : null;
+        if (count > MAX_FAILURES) {
+          level = Math.min(level + 1, LOCK_DURATIONS_MS.length);
+          lockedUntil = new Date(now.getTime() + LOCK_DURATIONS_MS[level - 1]);
+          failureExpiresAt = null;
+          levelExpiresAt = new Date(now.getTime() + WINDOW_MS);
+        }
+        await client.query(
+          `UPDATE login_rate_limits
+              SET failure_count = $2, lock_level = $3, locked_until = $4,
+                  failure_expires_at = $5, level_expires_at = $6, updated_at = $7
+            WHERE key_hash = $1`,
+          [row.key_hash, lockedUntil ? 0 : count, level, lockedUntil, failureExpiresAt, levelExpiresAt, now]
+        );
+      }
+      return remaining(client, hashes);
+    });
+  });
 }
 
 export async function clearSuccessfulLogin(account: string): Promise<void> {
-  await store().clearAccount(account);
+  return protectedOperation("reset", async () => {
+    const [identity] = identities(null, account);
+    await withDatabase(async (client) => {
+      // UPDATE locks and serializes with failures. Retaining an empty row
+      // avoids deletion racing between INSERT and SELECT FOR UPDATE.
+      await client.query(
+        `UPDATE login_rate_limits SET failure_count = 0, lock_level = 0,
+            locked_until = NULL, failure_expires_at = NULL, level_expires_at = NULL,
+            updated_at = clock_timestamp()
+          WHERE key_hash = $1 AND scope = 'account'`,
+        [identity.hash]
+      );
+    });
+  });
 }
 
-/*
- * The compatibility exports below keep route call sites small while the
- * production implementation stays isolated behind LoginRateLimitStore.
- */
 export const LOGIN_RATE_LIMIT_WINDOW_MS = WINDOW_MS;
 export const LOGIN_RATE_LIMIT_MAX_FAILURES = MAX_FAILURES;
-export const LOGIN_LOCK_DURATIONS_SECONDS = LOCK_DURATIONS_MS.map((duration) => duration / 1000) as [
-  number,
-  number,
-  number,
-  number,
-];
+export const LOGIN_LOCK_DURATIONS_SECONDS = LOCK_DURATIONS_MS.map((duration) => duration / 1000);

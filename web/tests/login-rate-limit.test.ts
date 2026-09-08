@@ -1,221 +1,310 @@
-import { after, afterEach, before, test } from "node:test";
+import { after, before, mock, test } from "node:test";
 import assert from "node:assert/strict";
+import { createHmac, randomUUID } from "node:crypto";
+import { pool, query, transaction } from "../src/server/db/pool";
+import { POST as adminLogin } from "../src/app/api/admin/login/route";
+import { POST as ownerLogin } from "../src/app/api/owner/login/route";
 import {
-  checkLoginLimit,
-  clearSuccessfulLogin,
-  clientIp,
-  LOGIN_LOCK_DURATIONS_SECONDS,
-  LOGIN_RATE_LIMIT_MAX_FAILURES,
-  normalizedLoginAccount,
-  recordFailedLogin,
-  setLoginRateLimitStoreForTests,
-  type LoginRateLimit,
-  type LoginRateLimitStore,
+  checkLoginLimit, clearSuccessfulLogin, clientIp,
+  LoginRateLimitUnavailable, normalizedLoginAccount, recordFailedLogin,
 } from "../src/server/security/loginRateLimit";
 
-const originalTrustProxy = process.env.TRUST_PROXY_X_FORWARDED_FOR;
+const secret = `test-only-${randomUUID()}`;
+const originalSecret = process.env.LOGIN_RATE_LIMIT_SECRET;
+const originalTrust = process.env.TRUST_PROXY_X_FORWARDED_FOR;
+const cleanup = new Set<string>();
+const unlocked = { locked: false, retryAfterSeconds: 0 };
 
-before(() => {
+before(async () => {
+  process.env.LOGIN_RATE_LIMIT_SECRET = secret;
   process.env.TRUST_PROXY_X_FORWARDED_FOR = "true";
+  // Deliberately fail if CI did not run the real migration.
+  await query("SELECT key_hash FROM login_rate_limits LIMIT 0");
 });
 
-after(() => {
-  if (originalTrustProxy === undefined) delete process.env.TRUST_PROXY_X_FORWARDED_FOR;
-  else process.env.TRUST_PROXY_X_FORWARDED_FOR = originalTrustProxy;
+after(async () => {
+  try {
+    await query("DELETE FROM login_rate_limits WHERE key_hash = ANY($1::text[])", [[...cleanup]]);
+  } finally {
+    if (originalSecret === undefined) delete process.env.LOGIN_RATE_LIMIT_SECRET;
+    else process.env.LOGIN_RATE_LIMIT_SECRET = originalSecret;
+    if (originalTrust === undefined) delete process.env.TRUST_PROXY_X_FORWARDED_FOR;
+    else process.env.TRUST_PROXY_X_FORWARDED_FOR = originalTrust;
+    await pool.end();
+  }
 });
 
-type MemoryState = {
-  failureCount: number;
-  lockLevel: number;
-  lockUntil: number;
-};
+function key(identity: string, scope = "account") {
+  const value = scope === "account" ? normalizedLoginAccount(identity) : identity;
+  const result = `login-limit:${scope}:${createHmac("sha256", secret).update(value).digest("base64url")}`;
+  cleanup.add(result);
+  return result;
+}
 
-class MemoryRateLimitStore implements LoginRateLimitStore {
-  private readonly states = new Map<string, MemoryState>();
-  private now = 0;
+function account() {
+  const value = `${randomUUID()}@example.test`;
+  key(value);
+  return value;
+}
 
-  private keys(ip: string | null, account: string): string[] {
-    return [
-      ...(ip ? [`ip:${ip}`] : []),
-      `account:${account}`,
-    ];
+async function snapshot(identity: string, scope = "account") {
+  const [row] = await query<{
+    key_hash: string; scope: string; failure_count: number; lock_level: number;
+    locked_until: Date | null; failure_expires_at: Date | null;
+    level_expires_at: Date | null; updated_at: Date;
+  }>("SELECT * FROM login_rate_limits WHERE key_hash=$1", [key(identity, scope)]);
+  return row;
+}
+
+async function cycle(identity: string, seconds: number, ip: string | null = null) {
+  if (ip) key(ip, "ip");
+  for (let i = 0; i < 5; i++) {
+    assert.deepEqual(await checkLoginLimit(ip, identity), unlocked);
+    assert.deepEqual(await recordFailedLogin(ip, identity), unlocked);
+    assert.equal((await snapshot(identity)).failure_count, i + 1);
   }
+  const result = await recordFailedLogin(ip, identity);
+  assert.equal(result.locked, true);
+  assert.ok(result.retryAfterSeconds <= seconds && result.retryAfterSeconds >= seconds - 1);
+  const row = await snapshot(identity);
+  assert.equal(row.failure_count, 0);
+  assert.equal(row.locked_until!.getTime() - row.updated_at.getTime(), seconds * 1000);
+}
 
-  advance(seconds: number) {
-    this.now += seconds * 1_000;
+async function expireLock(identity: string) {
+  await query("UPDATE login_rate_limits SET locked_until=clock_timestamp()-interval '1 second' WHERE key_hash=$1", [key(identity)]);
+  assert.deepEqual(await checkLoginLimit(null, identity), unlocked);
+}
+
+test("first five PostgreSQL failures are allowed; sixth locks for 30 seconds", async () => {
+  await cycle(account(), 30);
+});
+
+test("remaining TTL decreases and blocked checks/record races leave all state unchanged", async () => {
+  const identity = account();
+  await cycle(identity, 30);
+  // Move this disposable row's clock forward without waiting in real time.
+  await query("UPDATE login_rate_limits SET locked_until=clock_timestamp()+interval '20 seconds' WHERE key_hash=$1", [key(identity)]);
+  const before = await snapshot(identity);
+  for (let i = 0; i < 3; i++) {
+    const checked = await checkLoginLimit(null, identity);
+    const recorded = await recordFailedLogin(null, identity);
+    assert.ok(checked.retryAfterSeconds >= 19 && checked.retryAfterSeconds <= 20);
+    assert.ok(recorded.retryAfterSeconds <= checked.retryAfterSeconds);
+    assert.deepEqual(await snapshot(identity), before);
   }
+});
 
-  private state(key: string): MemoryState {
-    const existing = this.states.get(key);
-    if (existing) return existing;
-    const state = { failureCount: 0, lockLevel: 0, lockUntil: 0 };
-    this.states.set(key, state);
-    return state;
+test("completed cycles progress 30, 60, 120, 300, 300 seconds and never exceed the cap", async () => {
+  const identity = account();
+  for (const seconds of [30, 60, 120, 300, 300]) {
+    await cycle(identity, seconds);
+    assert.ok((await checkLoginLimit(null, identity)).retryAfterSeconds <= 300);
+    await expireLock(identity);
   }
+  assert.equal((await snapshot(identity)).lock_level, 4);
+});
 
-  private limit(keys: string[]): LoginRateLimit {
-    const remaining = keys
-      .map((key) => this.state(key).lockUntil - this.now)
-      .filter((milliseconds) => milliseconds > 0);
-    return remaining.length === 0
-      ? { locked: false, retryAfterSeconds: 0 }
-      : { locked: true, retryAfterSeconds: Math.ceil(Math.max(...remaining) / 1_000) };
-  }
+test("account A cannot lock account B; missing IP creates only an obscured account row", async () => {
+  const a = account(), b = account();
+  await cycle(a, 30);
+  assert.deepEqual(await checkLoginLimit(null, b), unlocked);
+  assert.equal(await snapshot(b), undefined);
+  const row = await snapshot(a);
+  assert.equal(row.scope, "account");
+  assert.match(row.key_hash, /^login-limit:account:[A-Za-z0-9_-]{43}$/);
+  assert.ok(!JSON.stringify(row).includes(a));
+});
 
-  async check(ip: string | null, account: string): Promise<LoginRateLimit> {
-    return this.limit(this.keys(ip, account));
-  }
+test("trusted IP accumulates across accounts while another IP remains independent", async () => {
+  const ip = "198.51.100.10";
+  key(ip, "ip");
+  for (let i = 0; i < 6; i++) await recordFailedLogin(ip, account());
+  const identity = account();
+  assert.equal((await checkLoginLimit(ip, identity)).locked, true);
+  assert.deepEqual(await checkLoginLimit("198.51.100.11", identity), unlocked);
+  assert.deepEqual(await checkLoginLimit(null, identity), unlocked);
+  const row = await snapshot(ip, "ip");
+  assert.equal(row.scope, "trusted_ip");
+  assert.ok(!JSON.stringify(row).includes(ip));
+});
 
-  async recordFailure(ip: string | null, account: string): Promise<LoginRateLimit> {
-    const keys = this.keys(ip, account);
-    for (const key of keys) {
-      const state = this.state(key);
-      if (state.lockUntil > this.now) continue;
-      if (state.lockUntil > 0) {
-        state.lockUntil = 0;
-        state.failureCount = 0;
-      }
-      state.failureCount += 1;
-      if (state.failureCount > LOGIN_RATE_LIMIT_MAX_FAILURES) {
-        state.lockLevel = Math.min(state.lockLevel + 1, LOGIN_LOCK_DURATIONS_SECONDS.length);
-        state.lockUntil = this.now + LOGIN_LOCK_DURATIONS_SECONDS[state.lockLevel - 1] * 1_000;
-        state.failureCount = 0;
+test("a locked account also blocks from a new IP", async () => {
+  const identity = account();
+  await cycle(identity, 30);
+  assert.equal((await checkLoginLimit("198.51.100.12", identity)).locked, true);
+});
+
+test("success resets account count, lock, level and expiries without changing IP or other accounts", async () => {
+  const identity = account(), other = account(), ip = "198.51.100.20";
+  await cycle(identity, 30, ip);
+  await recordFailedLogin(null, other);
+  const ipBefore = await snapshot(ip, "ip"), otherBefore = await snapshot(other);
+  await clearSuccessfulLogin(identity);
+  const row = await snapshot(identity);
+  assert.equal(row.failure_count, 0);
+  assert.equal(row.lock_level, 0);
+  assert.equal(row.locked_until, null);
+  assert.equal(row.failure_expires_at, null);
+  assert.equal(row.level_expires_at, null);
+  assert.deepEqual(await snapshot(ip, "ip"), ipBefore);
+  assert.deepEqual(await snapshot(other), otherBefore);
+  assert.deepEqual(await checkLoginLimit(null, identity), unlocked);
+  await cycle(identity, 30);
+});
+
+test("expired failure window resets the count without background cleanup", async () => {
+  const identity = account();
+  for (let i = 0; i < 5; i++) await recordFailedLogin(null, identity);
+  await query("UPDATE login_rate_limits SET failure_expires_at=clock_timestamp()-interval '1 second' WHERE key_hash=$1", [key(identity)]);
+  assert.deepEqual(await recordFailedLogin(null, identity), unlocked);
+  assert.equal((await snapshot(identity)).failure_count, 1);
+});
+
+test("expired level window resets progression without background cleanup", async () => {
+  const identity = account();
+  await cycle(identity, 30);
+  await expireLock(identity);
+  await cycle(identity, 60);
+  await expireLock(identity);
+  await query("UPDATE login_rate_limits SET level_expires_at=clock_timestamp()-interval '1 second' WHERE key_hash=$1", [key(identity)]);
+  await cycle(identity, 30);
+  assert.equal((await snapshot(identity)).lock_level, 1);
+});
+
+test("five concurrent first failures lose no increments for account or IP", async () => {
+  const identity = account(), ip = "198.51.100.30";
+  key(ip, "ip");
+  const results = await Promise.all(Array.from({ length: 5 }, () => recordFailedLogin(ip, identity)));
+  assert.ok(results.every((result) => !result.locked));
+  assert.equal((await snapshot(identity)).failure_count, 5);
+  assert.equal((await snapshot(ip, "ip")).failure_count, 5);
+});
+
+test("concurrent threshold crossings create exactly one lock and one level", async () => {
+  const identity = account();
+  const results = await Promise.all(Array.from({ length: 12 }, () => recordFailedLogin(null, identity)));
+  assert.equal(results.filter((result) => !result.locked).length, 5);
+  assert.equal(results.filter((result) => result.locked).length, 7);
+  const row = await snapshot(identity);
+  assert.equal(row.failure_count, 0);
+  assert.equal(row.lock_level, 1);
+  assert.equal(row.locked_until!.getTime() - row.updated_at.getTime(), 30_000);
+});
+
+test("a check-to-record race against a locked IP does not increment the account", async () => {
+  const identity = account(), ip = "198.51.100.40";
+  key(ip, "ip");
+  await recordFailedLogin(null, identity);
+  const before = await snapshot(identity);
+  assert.deepEqual(await checkLoginLimit(ip, identity), unlocked);
+  for (let i = 0; i < 6; i++) await recordFailedLogin(ip, account());
+  const ipBefore = await snapshot(ip, "ip");
+  assert.equal((await recordFailedLogin(ip, identity)).locked, true);
+  assert.deepEqual(await snapshot(identity), before);
+  assert.deepEqual(await snapshot(ip, "ip"), ipBefore);
+});
+
+test("both login routes return 401 for attempts 1-5, then 429 with database Retry-After", async () => {
+  for (const [handler, field] of [[adminLogin, "username"], [ownerLogin, "email"]] as const) {
+    const identity = account();
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      const response = await handler(new Request("http://test/login", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ [field]: identity, password: "invalid-test-only" }),
+      }));
+      assert.equal(response.status, attempt <= 5 ? 401 : 429);
+      assert.equal(response.headers.get("set-cookie"), null);
+      if (attempt === 6) {
+        assert.equal((await response.json()).error, "tooManyRequests");
+        assert.ok(Number(response.headers.get("retry-after")) <= 30);
+        assert.ok(Number(response.headers.get("retry-after")) >= 29);
       }
     }
-    return this.limit(keys);
-  }
-
-  async clearAccount(account: string): Promise<void> {
-    this.states.delete(`account:${account}`);
-  }
-}
-
-afterEach(() => setLoginRateLimitStoreForTests(undefined));
-
-async function fail(ip: string | null, account: string) {
-  const existing = await checkLoginLimit(ip, account);
-  if (existing.locked) return existing;
-  return recordFailedLogin(ip, account);
-}
-
-async function lockCycle(
-  ip: string | null,
-  account: string,
-  seconds: number
-) {
-  for (let attempt = 1; attempt <= LOGIN_RATE_LIMIT_MAX_FAILURES; attempt++) {
-    assert.deepEqual(await fail(ip, account), {
-      locked: false,
-      retryAfterSeconds: 0,
-    }, `attempt ${attempt} remains eligible for the route's 401 response`);
-  }
-  assert.deepEqual(await fail(ip, account), {
-    locked: true,
-    retryAfterSeconds: seconds,
-  });
-}
-
-test("attempts 1-5 remain 401-eligible and attempt 6 starts a 30-second lock", async () => {
-  const store = new MemoryRateLimitStore();
-  setLoginRateLimitStoreForTests(store);
-
-  await lockCycle("198.51.100.10", "account-a", 30);
-});
-
-test("Retry-After decreases and blocked requests do not extend the lock", async () => {
-  const store = new MemoryRateLimitStore();
-  setLoginRateLimitStoreForTests(store);
-  await lockCycle(null, "account-a", 30);
-
-  store.advance(10);
-  assert.deepEqual(await fail(null, "account-a"), { locked: true, retryAfterSeconds: 20 });
-  // recordFailure also defends the check-then-record race without refreshing
-  // the lock TTL.
-  assert.deepEqual(await recordFailedLogin(null, "account-a"), {
-    locked: true,
-    retryAfterSeconds: 20,
-  });
-  store.advance(10);
-  assert.deepEqual(await checkLoginLimit(null, "account-a"), {
-    locked: true,
-    retryAfterSeconds: 10,
-  });
-});
-
-test("each completed failure cycle progresses 30, 60, 120, then caps at 300 seconds", async () => {
-  const store = new MemoryRateLimitStore();
-  setLoginRateLimitStoreForTests(store);
-  const account = "account-a";
-
-  for (const seconds of [30, 60, 120, 300, 300]) {
-    await lockCycle(null, account, seconds);
-    assert.ok(seconds <= 300);
-    store.advance(seconds);
-    assert.deepEqual(await checkLoginLimit(null, account), {
-      locked: false,
-      retryAfterSeconds: 0,
-    });
   }
 });
 
-test("a successful login reset returns the account to the first lock level only", async () => {
-  const store = new MemoryRateLimitStore();
-  setLoginRateLimitStoreForTests(store);
-  await lockCycle(null, "account-a", 30);
-  store.advance(30);
-
-  await clearSuccessfulLogin("account-a");
-  await lockCycle(null, "account-a", 30);
+test("database read failure stops both login handlers before account lookup and returns opaque 503", async () => {
+  const logs = mock.method(console, "error", () => {});
+  try {
+    for (const [handler, field] of [[adminLogin, "username"], [ownerLogin, "email"]] as const) {
+      const rollback = new Error("test rollback");
+      await assert.rejects(transaction(async (client) => {
+        // Real missing-table failure in this transaction only.
+        await client.query("SET LOCAL search_path TO pg_catalog");
+        const spy = mock.method(client, "query");
+        try {
+          const response = await handler(new Request("http://test/login", {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ [field]: account(), password: "never-verify-this" }),
+          }));
+          assert.equal(response.status, 503);
+          assert.deepEqual(await response.json(), { error: "server" });
+          assert.equal(response.headers.get("set-cookie"), null);
+          const statements = spy.mock.calls.map((call) => String(call.arguments[0])).join(" ");
+          assert.doesNotMatch(statements, /admin_users|club_owners|sessions/i);
+        } finally {
+          spy.mock.restore();
+        }
+        throw rollback;
+      }), rollback);
+    }
+    assert.ok(logs.mock.calls.length >= 2);
+    for (const call of logs.mock.calls) {
+      assert.deepEqual(call.arguments, ["login rate limiter unavailable", { operation: "check", reason: "database_failure" }]);
+    }
+  } finally {
+    logs.mock.restore();
+  }
 });
 
-test("missing IPs remain account-only and cannot lock unrelated accounts", async () => {
-  const store = new MemoryRateLimitStore();
-  setLoginRateLimitStoreForTests(store);
-
-  await lockCycle(null, "account-a", 30);
-  assert.equal((await checkLoginLimit(null, "account-a")).locked, true);
-  assert.equal((await checkLoginLimit(null, "account-b")).locked, false);
+test("database write/reset failures fail closed and preserve committed state", async () => {
+  const identity = account();
+  await recordFailedLogin(null, identity);
+  const before = await snapshot(identity);
+  const logs = mock.method(console, "error", () => {});
+  try {
+    for (const operation of [() => recordFailedLogin(null, identity), () => clearSuccessfulLogin(identity)]) {
+      const rollback = new Error("test rollback");
+      await assert.rejects(transaction(async (client) => {
+        await client.query("SET TRANSACTION READ ONLY");
+        await assert.rejects(operation, LoginRateLimitUnavailable);
+        throw rollback;
+      }), rollback);
+      assert.deepEqual(await snapshot(identity), before);
+    }
+  } finally {
+    logs.mock.restore();
+  }
 });
 
-test("trusted IP and account keys each independently enforce a limit", async () => {
-  const store = new MemoryRateLimitStore();
-  setLoginRateLimitStoreForTests(store);
-
-  for (let attempt = 0; attempt < 6; attempt++) await fail("198.51.100.20", `account-${attempt}`);
-  assert.equal((await checkLoginLimit("198.51.100.20", "another-account")).locked, true);
-
-  await clearSuccessfulLogin("account-0");
-  assert.equal((await checkLoginLimit("198.51.100.21", "account-0")).locked, false);
-  assert.equal((await checkLoginLimit("198.51.100.20", "another-account")).locked, true);
+test("missing HMAC configuration fails closed without logging identities or secrets", async () => {
+  const logs = mock.method(console, "error", () => {});
+  delete process.env.LOGIN_RATE_LIMIT_SECRET;
+  try {
+    await assert.rejects(() => checkLoginLimit(null, "private@example.test"), LoginRateLimitUnavailable);
+    assert.deepEqual(logs.mock.calls[0].arguments, ["login rate limiter unavailable", {
+      operation: "check", reason: "missing_configuration",
+    }]);
+  } finally {
+    process.env.LOGIN_RATE_LIMIT_SECRET = secret;
+    logs.mock.restore();
+  }
 });
 
-test("client IP accepts only valid trusted IPv4 or IPv6 forwarding values", () => {
+test("trusted-IP parsing and case-insensitive account identity remain unchanged", async () => {
   const from = (value?: string) => clientIp(new Request("http://test", {
     headers: value ? { "x-forwarded-for": value } : undefined,
   }));
   assert.equal(from("198.51.100.10, 10.0.0.1"), "198.51.100.10");
   assert.equal(from("2001:db8::1"), "2001:db8::1");
   assert.equal(from(), null);
-  assert.equal(from("not-an-ip"), null);
-});
-
-test("account limiter keys are case-insensitive like staff username lookup", () => {
-  assert.equal(normalizedLoginAccount(" Admin "), "admin");
-  assert.equal(normalizedLoginAccount("ADMIN"), "admin");
-});
-
-test("development uses a local limiter when no Upstash service is configured", async () => {
-  // No injected store: this exercises the local development fallback used by
-  // the login routes in a standard `.env.local` setup.
-  const account = `local-${Date.now()}@example.test`;
-  assert.deepEqual(await checkLoginLimit(null, account), {
-    locked: false,
-    retryAfterSeconds: 0,
-  });
-  for (let attempt = 0; attempt < LOGIN_RATE_LIMIT_MAX_FAILURES + 1; attempt++) {
-    await recordFailedLogin(null, account);
-  }
-  assert.equal((await checkLoginLimit(null, account)).locked, true);
-  await clearSuccessfulLogin(account);
-  assert.equal((await checkLoginLimit(null, account)).locked, false);
+  assert.equal(from("invalid"), null);
+  process.env.TRUST_PROXY_X_FORWARDED_FOR = "false";
+  assert.equal(from("198.51.100.10"), null);
+  process.env.TRUST_PROXY_X_FORWARDED_FOR = "true";
+  const identity = account();
+  await recordFailedLogin(null, ` ${identity.toUpperCase()} `);
+  await recordFailedLogin(null, identity);
+  assert.equal((await snapshot(identity)).failure_count, 2);
 });

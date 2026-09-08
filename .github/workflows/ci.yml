@@ -33,6 +33,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://ngwh_test:ngwh_test@localhost:5432/ngwh_test
+      LOGIN_RATE_LIMIT_SECRET: ci-only-login-rate-limit-secret
       NEXT_PUBLIC_SANITY_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_SANITY_PROJECT_ID }}
       NEXT_PUBLIC_SANITY_DATASET: ${{ secrets.NEXT_PUBLIC_SANITY_DATASET }}
       MY_MEMORY_KEY: ${{ secrets.MY_MEMORY_KEY }}

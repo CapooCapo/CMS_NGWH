@@ -113,9 +113,8 @@ before(async () => {
   });
   if (login.status === 503) {
     // This suite creates owner sessions through the running server. The
-    // deterministic limiter suite covers authentication without external
-    // Upstash; skip this optional black-box suite when its server is correctly
-    // fail-closed due to missing credentials.
+    // PostgreSQL limiter suite runs separately; skip this optional black-box
+    // suite when its server is fail-closed due to missing limiter configuration.
     serverUp = false;
     console.log("      (running server has no rate-limit store — suite skipped)");
     return;
