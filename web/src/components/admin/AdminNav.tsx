@@ -24,6 +24,7 @@ const ITEMS: {
   { href: "/admin/matches", labelKey: "matches", roles: ["editor", "operator"] },
   { href: "/admin/contact", labelKey: "contact", roles: ["editor"] },
   { href: "/admin/users", labelKey: "users", roles: [] },
+  { href: "/admin/audit-logs", labelKey: "auditLogs", roles: [] },
 ];
 
 export function AdminNav({ role }: { role: AdminRole }) {

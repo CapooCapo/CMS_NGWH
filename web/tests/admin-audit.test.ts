@@ -2,7 +2,10 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import type { PoolClient } from "pg";
 import { query, queryOne, transaction } from "../src/server/db/pool";
-import { createAdminAuditLog } from "../src/server/repositories/adminAuditLogs";
+import {
+  createAdminAuditLog,
+  listAdminAuditLogs,
+} from "../src/server/repositories/adminAuditLogs";
 import { auditedAdminMutation } from "../src/server/security/adminAudit";
 
 const TAG = `test-audit-${process.pid}`;
@@ -93,6 +96,7 @@ test("a business mutation and its audit insert use one transaction", async (t) =
       created_at: audit.created_at,
     });
     assert.ok(audit.created_at);
+    assert.ok(!Number.isNaN(new Date(audit.created_at).getTime()));
   });
 });
 
@@ -178,5 +182,59 @@ test("audit rows reject UPDATE and DELETE while INSERT uses the repository path"
     await client.query("SAVEPOINT audit_delete");
     await assert.rejects(client.query("DELETE FROM admin_audit_logs WHERE id = $1", [id]));
     await client.query("ROLLBACK TO SAVEPOINT audit_delete");
+  });
+});
+
+test("audit history is newest-first, paginated, filtered, and omits sensitive metadata", async (t) => {
+  if (!actorId) return t.skip("no admin fixture in configured database");
+  await withRollback(async (client) => {
+    for (const resourceId of ["first", "second", "third"]) {
+      await createAdminAuditLog({
+        actorId: actorId!,
+        action: "test.audit.read",
+        resourceType: "test",
+        resourceId,
+        metadata: {
+          changed: [resourceId],
+          password: "never expose this",
+        },
+        ip: null,
+      }, client);
+    }
+    const firstPage = await listAdminAuditLogs(1, { action: "test.audit.read" }, 2);
+    assert.equal(firstPage.total, 3);
+    assert.equal(firstPage.pageSize, 2);
+    assert.deepEqual(firstPage.rows.map((row) => row.resourceId), ["third", "second"]);
+    assert.deepEqual(firstPage.rows[0]?.metadata, { changed: ["third"] });
+    assert.match(firstPage.rows[0]?.createdAt ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    assert.ok(!Number.isNaN(new Date(firstPage.rows[0]?.createdAt).getTime()));
+
+    const secondPage = await listAdminAuditLogs(2, { action: "test.audit.read" }, 2);
+    assert.deepEqual(secondPage.rows.map((row) => row.resourceId), ["first"]);
+    const filtered = await listAdminAuditLogs(1, { actorId: actorId!, resourceType: "test" }, 50);
+    assert.ok(filtered.rows.every((row) => row.actorId === actorId && row.resourceType === "test"));
+  });
+});
+
+test("score audit entries receive a default ISO creation time", async (t) => {
+  if (!actorId) return t.skip("no admin fixture in configured database");
+  await withRollback(async () => {
+    const resourceId = `${TAG}-score`;
+    await auditedAdminMutation(
+      request(),
+      {
+        actorId: actorId!,
+        action: "match.score.update",
+        resourceType: "match",
+        resourceId,
+        metadata: { changed: ["homeScore", "awayScore"] },
+      },
+      async () => true
+    );
+    const logs = await listAdminAuditLogs(1, { action: "match.score.update" }, 50);
+    const scoreAudit = logs.rows.find((row) => row.resourceId === resourceId);
+    assert.ok(scoreAudit);
+    assert.match(scoreAudit.createdAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    assert.ok(!Number.isNaN(new Date(scoreAudit.createdAt).getTime()));
   });
 });

@@ -463,7 +463,8 @@
       "matchDetail": "Thống kê trận đấu",
       "registrations": "Hồ sơ đăng ký",
       "contact": "Hộp thư liên hệ",
-      "users": "Tài khoản nhân sự"
+      "users": "Tài khoản nhân sự",
+      "auditLogs": "Nhật ký kiểm tra"
     },
     "nav": {
       "label": "Điều hướng quản trị",
@@ -473,7 +474,8 @@
       "seasons": "Mùa giải",
       "matches": "Trận đấu & bảng điểm",
       "contact": "Hộp thư liên hệ",
-      "users": "Tài khoản nhân sự"
+      "users": "Tài khoản nhân sự",
+      "auditLogs": "Nhật ký kiểm tra"
     },
     "shell": {
       "skipToContent": "Chuyển đến nội dung chính"
@@ -616,6 +618,22 @@
       ,"status": "Trạng thái"
       ,"lastLogin": "Lần đăng nhập gần nhất"
       ,"actions": "Thao tác"
+    },
+    "auditLogs": {
+      "title": "Nhật ký kiểm tra",
+      "description": "Lịch sử chỉ đọc của các thay đổi quản trị đã thành công.",
+      "databaseUnavailable": "Không thể tải lịch sử kiểm tra",
+      "empty": "Chưa có bản ghi kiểm tra.",
+      "tableCaption": "Lịch sử kiểm tra quản trị",
+      "time": "Thời gian",
+      "actor": "Quản trị viên",
+      "action": "Thao tác",
+      "resource": "Tài nguyên",
+      "resourceId": "Mã tài nguyên",
+      "ip": "IP",
+      "metadata": "Siêu dữ liệu",
+      "unknownIp": "Không xác định",
+      "noMetadata": "—"
     },
     "matches": {
       "title": "Trận đấu & bảng điểm",

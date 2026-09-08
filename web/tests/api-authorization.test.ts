@@ -53,6 +53,7 @@ after(() => {
 /** Every admin endpoint, with the method that mutates or reads it. */
 const ADMIN_ENDPOINTS: [string, string][] = [
   ["GET", "/api/admin/me"],
+  ["GET", "/api/admin/audit-logs"],
   ["GET", "/api/admin/registrations"],
   ["POST", "/api/admin/registrations/1/review"],
   ["GET", "/api/admin/registrations/1/documents/1"],
@@ -185,6 +186,7 @@ test("an authenticated session can read admin endpoints", async (t) => {
   if (!sessionCookie) return t.skip("no TEST_ADMIN_PASSWORD provided");
   for (const path of [
     "/api/admin/me",
+    "/api/admin/audit-logs",
     "/api/admin/registrations",
     "/api/admin/clubs",
     "/api/admin/seasons",
@@ -197,6 +199,41 @@ test("an authenticated session can read admin endpoints", async (t) => {
     });
     assert.equal(response.status, 200, `${path} returned ${response.status}`);
   }
+});
+
+test("audit history is read-only and rejects unsafe pagination filters", async (t) => {
+  if (!serverUp) return t.skip("server not running");
+  const sessionCookie = cookie;
+  if (!sessionCookie) return t.skip("no TEST_ADMIN_PASSWORD provided");
+
+  const limited = await fetch(`${BASE}/api/admin/audit-logs?limit=1`, {
+    headers: { Cookie: sessionCookie },
+  });
+  assert.equal(limited.status, 200);
+  const body = (await limited.json()) as {
+    items: { createdAt: string }[];
+    pagination: { limit: number };
+  };
+  assert.ok(body.items.length <= 1);
+  assert.equal(body.pagination.limit, 1);
+  for (const item of body.items) {
+    assert.match(item.createdAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    assert.ok(!Number.isNaN(new Date(item.createdAt).getTime()));
+  }
+
+  const invalid = await fetch(`${BASE}/api/admin/audit-logs?limit=51`, {
+    headers: { Cookie: sessionCookie },
+  });
+  assert.equal(invalid.status, 400);
+  assert.deepEqual(await invalid.json(), {
+    error: { code: "INVALID_INPUT", message: "Invalid request" },
+  });
+
+  const write = await fetch(`${BASE}/api/admin/audit-logs`, {
+    method: "POST",
+    headers: { Cookie: sessionCookie },
+  });
+  assert.equal(write.status, 405);
 });
 
 test("public contact endpoint validates its input", async (t) => {

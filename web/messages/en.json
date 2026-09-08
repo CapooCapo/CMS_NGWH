@@ -463,7 +463,8 @@
       "matchDetail": "Match statistics",
       "registrations": "Registrations",
       "contact": "Contact inbox",
-      "users": "Staff accounts"
+      "users": "Staff accounts",
+      "auditLogs": "Audit logs"
     },
     "nav": {
       "label": "Admin navigation",
@@ -473,7 +474,8 @@
       "seasons": "Seasons",
       "matches": "Matches & scoreboard",
       "contact": "Contact inbox",
-      "users": "Staff accounts"
+      "users": "Staff accounts",
+      "auditLogs": "Audit logs"
     },
     "shell": {
       "skipToContent": "Skip to main content"
@@ -616,6 +618,22 @@
       ,"status": "Status"
       ,"lastLogin": "Last sign-in"
       ,"actions": "Actions"
+    },
+    "auditLogs": {
+      "title": "Audit logs",
+      "description": "Read-only history of successful administrative changes.",
+      "databaseUnavailable": "Audit history is unavailable",
+      "empty": "No audit records yet.",
+      "tableCaption": "Administrative audit history",
+      "time": "Time",
+      "actor": "Admin",
+      "action": "Action",
+      "resource": "Resource",
+      "resourceId": "Resource ID",
+      "ip": "IP",
+      "metadata": "Metadata",
+      "unknownIp": "Unknown",
+      "noMetadata": "—"
     },
     "matches": {
       "title": "Matches & scoreboard",
