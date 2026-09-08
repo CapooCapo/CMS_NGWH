@@ -4,6 +4,7 @@ import {
   checkLoginLimit,
   clearSuccessfulLogin,
   clientIp,
+  LOGIN_LOCK_DURATIONS_SECONDS,
   LOGIN_RATE_LIMIT_MAX_FAILURES,
   normalizedLoginAccount,
   recordFailedLogin,
@@ -23,8 +24,15 @@ after(() => {
   else process.env.TRUST_PROXY_X_FORWARDED_FOR = originalTrustProxy;
 });
 
+type MemoryState = {
+  failureCount: number;
+  lockLevel: number;
+  lockUntil: number;
+};
+
 class MemoryRateLimitStore implements LoginRateLimitStore {
-  private readonly failures = new Map<string, number>();
+  private readonly states = new Map<string, MemoryState>();
+  private now = 0;
 
   private keys(ip: string | null, account: string): string[] {
     return [
@@ -33,9 +41,25 @@ class MemoryRateLimitStore implements LoginRateLimitStore {
     ];
   }
 
+  advance(seconds: number) {
+    this.now += seconds * 1_000;
+  }
+
+  private state(key: string): MemoryState {
+    const existing = this.states.get(key);
+    if (existing) return existing;
+    const state = { failureCount: 0, lockLevel: 0, lockUntil: 0 };
+    this.states.set(key, state);
+    return state;
+  }
+
   private limit(keys: string[]): LoginRateLimit {
-    const locked = keys.some((key) => (this.failures.get(key) ?? 0) > LOGIN_RATE_LIMIT_MAX_FAILURES);
-    return { locked, retryAfterSeconds: locked ? 900 : 0 };
+    const remaining = keys
+      .map((key) => this.state(key).lockUntil - this.now)
+      .filter((milliseconds) => milliseconds > 0);
+    return remaining.length === 0
+      ? { locked: false, retryAfterSeconds: 0 }
+      : { locked: true, retryAfterSeconds: Math.ceil(Math.max(...remaining) / 1_000) };
   }
 
   async check(ip: string | null, account: string): Promise<LoginRateLimit> {
@@ -44,12 +68,25 @@ class MemoryRateLimitStore implements LoginRateLimitStore {
 
   async recordFailure(ip: string | null, account: string): Promise<LoginRateLimit> {
     const keys = this.keys(ip, account);
-    for (const key of keys) this.failures.set(key, (this.failures.get(key) ?? 0) + 1);
+    for (const key of keys) {
+      const state = this.state(key);
+      if (state.lockUntil > this.now) continue;
+      if (state.lockUntil > 0) {
+        state.lockUntil = 0;
+        state.failureCount = 0;
+      }
+      state.failureCount += 1;
+      if (state.failureCount > LOGIN_RATE_LIMIT_MAX_FAILURES) {
+        state.lockLevel = Math.min(state.lockLevel + 1, LOGIN_LOCK_DURATIONS_SECONDS.length);
+        state.lockUntil = this.now + LOGIN_LOCK_DURATIONS_SECONDS[state.lockLevel - 1] * 1_000;
+        state.failureCount = 0;
+      }
+    }
     return this.limit(keys);
   }
 
   async clearAccount(account: string): Promise<void> {
-    this.failures.delete(`account:${account}`);
+    this.states.delete(`account:${account}`);
   }
 }
 
@@ -61,31 +98,88 @@ async function fail(ip: string | null, account: string) {
   return recordFailedLogin(ip, account);
 }
 
-test("five failures are allowed and the sixth returns a lock with Retry-After", async () => {
-  setLoginRateLimitStoreForTests(new MemoryRateLimitStore());
-
-  for (let attempt = 1; attempt <= 5; attempt++) {
-    assert.deepEqual(await fail("198.51.100.10", "account-a"), {
+async function lockCycle(
+  ip: string | null,
+  account: string,
+  seconds: number
+) {
+  for (let attempt = 1; attempt <= LOGIN_RATE_LIMIT_MAX_FAILURES; attempt++) {
+    assert.deepEqual(await fail(ip, account), {
       locked: false,
       retryAfterSeconds: 0,
-    }, `attempt ${attempt}`);
+    }, `attempt ${attempt} remains eligible for the route's 401 response`);
   }
-  assert.deepEqual(await fail("198.51.100.10", "account-a"), {
+  assert.deepEqual(await fail(ip, account), {
     locked: true,
-    retryAfterSeconds: 900,
+    retryAfterSeconds: seconds,
+  });
+}
+
+test("attempts 1-5 remain 401-eligible and attempt 6 starts a 30-second lock", async () => {
+  const store = new MemoryRateLimitStore();
+  setLoginRateLimitStoreForTests(store);
+
+  await lockCycle("198.51.100.10", "account-a", 30);
+});
+
+test("Retry-After decreases and blocked requests do not extend the lock", async () => {
+  const store = new MemoryRateLimitStore();
+  setLoginRateLimitStoreForTests(store);
+  await lockCycle(null, "account-a", 30);
+
+  store.advance(10);
+  assert.deepEqual(await fail(null, "account-a"), { locked: true, retryAfterSeconds: 20 });
+  // recordFailure also defends the check-then-record race without refreshing
+  // the lock TTL.
+  assert.deepEqual(await recordFailedLogin(null, "account-a"), {
+    locked: true,
+    retryAfterSeconds: 20,
+  });
+  store.advance(10);
+  assert.deepEqual(await checkLoginLimit(null, "account-a"), {
+    locked: true,
+    retryAfterSeconds: 10,
   });
 });
 
-test("missing IPs remain account-only and cannot lock unrelated accounts", async () => {
-  setLoginRateLimitStoreForTests(new MemoryRateLimitStore());
+test("each completed failure cycle progresses 30, 60, 120, then caps at 300 seconds", async () => {
+  const store = new MemoryRateLimitStore();
+  setLoginRateLimitStoreForTests(store);
+  const account = "account-a";
 
-  for (let attempt = 0; attempt < 6; attempt++) await fail(null, "account-a");
+  for (const seconds of [30, 60, 120, 300, 300]) {
+    await lockCycle(null, account, seconds);
+    assert.ok(seconds <= 300);
+    store.advance(seconds);
+    assert.deepEqual(await checkLoginLimit(null, account), {
+      locked: false,
+      retryAfterSeconds: 0,
+    });
+  }
+});
+
+test("a successful login reset returns the account to the first lock level only", async () => {
+  const store = new MemoryRateLimitStore();
+  setLoginRateLimitStoreForTests(store);
+  await lockCycle(null, "account-a", 30);
+  store.advance(30);
+
+  await clearSuccessfulLogin("account-a");
+  await lockCycle(null, "account-a", 30);
+});
+
+test("missing IPs remain account-only and cannot lock unrelated accounts", async () => {
+  const store = new MemoryRateLimitStore();
+  setLoginRateLimitStoreForTests(store);
+
+  await lockCycle(null, "account-a", 30);
   assert.equal((await checkLoginLimit(null, "account-a")).locked, true);
   assert.equal((await checkLoginLimit(null, "account-b")).locked, false);
 });
 
 test("trusted IP and account keys each independently enforce a limit", async () => {
-  setLoginRateLimitStoreForTests(new MemoryRateLimitStore());
+  const store = new MemoryRateLimitStore();
+  setLoginRateLimitStoreForTests(store);
 
   for (let attempt = 0; attempt < 6; attempt++) await fail("198.51.100.20", `account-${attempt}`);
   assert.equal((await checkLoginLimit("198.51.100.20", "another-account")).locked, true);
