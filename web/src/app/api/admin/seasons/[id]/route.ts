@@ -3,6 +3,7 @@ import { updateSeason } from "@/server/repositories/seasons";
 import { parseSeason } from "@/server/validation/admin";
 import { fail, notFound, ok, parseId } from "@/server/api/respond";
 import { readJson } from "@/server/validation/validate";
+import { auditedAdminMutation } from "@/server/security/adminAudit";
 
 export async function PATCH(
   request: Request,
@@ -13,7 +14,13 @@ export async function PATCH(
   const id = parseId((await params).id);
   if (!id) return notFound();
   try {
-    const season = await updateSeason(id, parseSeason(await readJson(request)));
+    const input = parseSeason(await readJson(request));
+    const season = await auditedAdminMutation(
+      request,
+      { actorId: guard.admin.id, action: "season.update", resourceType: "season", resourceId: id, metadata: { changed: Object.keys(input) } },
+      () => updateSeason(id, input),
+      Boolean
+    );
     if (!season) return notFound();
     return ok({ season });
   } catch (error) {

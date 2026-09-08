@@ -5,6 +5,7 @@ import {
 } from "@/server/services/registrationReview";
 import { fail, notFound, ok, parseId } from "@/server/api/respond";
 import { Validator, readJson } from "@/server/validation/validate";
+import { auditedAdminMutation } from "@/server/security/adminAudit";
 
 /**
  * BR-001 / REQ-CLUB-003 — approve or reject a club registration.
@@ -27,20 +28,34 @@ export async function POST(
   try {
     const body = await readJson(request);
     const v = new Validator(body);
+    v.only(["action"]);
     const action = v.enum("action", ["approved", "rejected"] as const, {
       required: true,
     });
     v.assert();
 
     if (action === "approved") {
-      const result = await approveRegistration(id);
+      const result = await auditedAdminMutation(
+        request,
+        (review) => ({
+          actorId: guard.admin.id, action: "registration.approve", resourceType: "registration", resourceId: id,
+          metadata: review.kind === "approved" ? { clubId: review.clubId } : undefined,
+        }),
+        () => approveRegistration(id),
+        (review) => review.kind === "approved"
+      );
       if (result.kind === "notFound") return notFound();
       if (result.kind !== "approved") {
         return Response.json({ error: result.kind }, { status: 409 });
       }
       return ok({ registration: result.registration, clubId: result.clubId });
     }
-    const result = await rejectRegistration(id);
+    const result = await auditedAdminMutation(
+      request,
+      { actorId: guard.admin.id, action: "registration.reject", resourceType: "registration", resourceId: id },
+      () => rejectRegistration(id),
+      (review) => review.kind === "rejected"
+    );
     if (result.kind === "notFound") return notFound();
     if (result.kind !== "rejected") {
       return Response.json({ error: result.kind }, { status: 409 });

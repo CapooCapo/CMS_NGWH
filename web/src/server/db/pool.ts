@@ -1,5 +1,7 @@
 import "server-only";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool, type QueryResultRow } from "pg";
+import { databaseConnectionOptions } from "./options";
 
 /**
  * Single shared connection pool.
@@ -8,6 +10,7 @@ import { Pool, type QueryResultRow } from "pg";
  * reload and exhaust Postgres connections, so the pool is cached on globalThis.
  */
 const globalForPool = globalThis as unknown as { ngwhPool?: Pool };
+const transactionContext = new AsyncLocalStorage<import("pg").PoolClient>();
 
 function createPool(): Pool {
   const connectionString = process.env.DATABASE_URL;
@@ -17,7 +20,7 @@ function createPool(): Pool {
         "database with `docker compose up -d`."
     );
   }
-  return new Pool({ connectionString, max: 10, idleTimeoutMillis: 30_000 });
+  return new Pool({ ...databaseConnectionOptions(connectionString), max: 10, idleTimeoutMillis: 30_000 });
 }
 
 export const pool: Pool = globalForPool.ngwhPool ?? createPool();
@@ -28,7 +31,10 @@ export async function query<T extends QueryResultRow>(
   text: string,
   params: readonly unknown[] = []
 ): Promise<T[]> {
-  const result = await pool.query<T>(text, params as unknown[]);
+  const client = transactionContext.getStore();
+  const result = client
+    ? await client.query<T>(text, params as unknown[])
+    : await pool.query<T>(text, params as unknown[]);
   return result.rows;
 }
 
@@ -45,10 +51,13 @@ export async function queryOne<T extends QueryResultRow>(
 export async function transaction<T>(
   fn: (client: import("pg").PoolClient) => Promise<T>
 ): Promise<T> {
+  const existingClient = transactionContext.getStore();
+  if (existingClient) return fn(existingClient);
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const result = await fn(client);
+    const result = await transactionContext.run(client, () => fn(client));
     await client.query("COMMIT");
     return result;
   } catch (error) {

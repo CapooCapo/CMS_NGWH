@@ -11,6 +11,7 @@ import { parseSocialLinks } from "./socialLinks";
 
 export function parseClub(body: Record<string, unknown>): ClubInput {
   const v = new Validator(body);
+  v.only(["slug", "name", "province", "foundingYear", "logoUrl", "achievementsEn", "achievementsVi", "contactEmail", "contactPhone", "websiteUrl", "socialLinks", "isApproved"]);
   const input: ClubInput = {
     slug: v.slug("slug", { required: true }) ?? "",
     name: v.string("name", { required: true, min: 2, max: 200 }) ?? "",
@@ -37,6 +38,7 @@ export function parseClubMember(
   { allowHeadCoach = false }: { allowHeadCoach?: boolean } = {}
 ): ClubMemberInput {
   const v = new Validator(body);
+  v.only(["fullName", "memberRole", "shirtNumber", "position", "birthYear"]);
   const memberRole =
     v.enum("memberRole", ["player", "coach", "staff"] as const, {
       required: true,
@@ -61,6 +63,7 @@ export function parseClubMember(
 
 export function parseSeason(body: Record<string, unknown>): SeasonInput {
   const v = new Validator(body);
+  v.only(["slug", "nameEn", "nameVi", "startsOn", "endsOn", "status"]);
   const startsOn = v.string("startsOn", { max: 10 });
   const endsOn = v.string("endsOn", { max: 10 });
   const input: SeasonInput = {
@@ -85,6 +88,7 @@ export function parseSeason(body: Record<string, unknown>): SeasonInput {
 
 export function parseMatch(body: Record<string, unknown>): MatchInput {
   const v = new Validator(body);
+  v.only(["seasonId", "homeClubId", "awayClubId", "homeTeamName", "awayTeamName", "venue", "scheduledAt", "status", "homeScore", "awayScore", "period"]);
   const input: MatchInput = {
     seasonId: v.integer("seasonId", { required: true, min: 1 }) ?? 0,
     homeClubId: v.integer("homeClubId", { min: 1 }),
@@ -119,6 +123,7 @@ export function parseMatch(body: Record<string, unknown>): MatchInput {
 
 export function parseScore(body: Record<string, unknown>) {
   const v = new Validator(body);
+  v.only(["homeScore", "awayScore", "status", "period"]);
   const input = {
     homeScore: v.integer("homeScore", { required: true, min: 0, max: 500 }) ?? 0,
     awayScore: v.integer("awayScore", { required: true, min: 0, max: 500 }) ?? 0,
@@ -136,6 +141,7 @@ export function parseScore(body: Record<string, unknown>) {
 
 export function parseScoreAdjustment(body: Record<string, unknown>) {
   const v = new Validator(body);
+  v.only(["team", "side", "kind", "delta"]);
   // `side` was used by the first live-control rollout; accept it as a
   // compatibility alias while clients use the clearer public `team` field.
   const teamField = body.team === undefined ? "side" : "team";
@@ -150,6 +156,7 @@ export function parseScoreAdjustment(body: Record<string, unknown>) {
 
 export function parseStatLine(body: Record<string, unknown>): StatLineInput {
   const v = new Validator(body);
+  v.only(["clubId", "playerName", "points", "assists"]);
   const input: StatLineInput = {
     clubId: v.integer("clubId", { min: 1 }),
     playerName: v.string("playerName", { required: true, min: 2, max: 160 }) ?? "",

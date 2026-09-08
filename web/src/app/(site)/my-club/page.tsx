@@ -16,12 +16,10 @@ import {
 } from "@/components/ui";
 import { RegistrationStatusPanel } from "@/components/clubs/RegistrationStatusPanel";
 import { ClubDeletionControl } from "@/components/owner/ClubDeletionControl";
-import { listClubMembers } from "@/server/repositories/clubs";
-import { listRegistrationDocumentsForClub } from "@/server/repositories/registrations";
 import {
   ownerDisplayName,
-  resolveOwnerWorkspace,
 } from "@/server/services/ownerWorkspace";
+import { loadMyClubWorkspace } from "@/server/services/myClub";
 import type { ClubMemberRole } from "@/server/repositories/types";
 import { SOCIAL_LINK_FIELDS } from "@/lib/clubSocialLinks";
 import { PLAYER_POSITIONS, STAFF_ROLES } from "@/lib/clubMembers";
@@ -54,7 +52,7 @@ export default async function MyClubPage() {
 
   let workspace;
   try {
-    workspace = await resolveOwnerWorkspace();
+    workspace = await loadMyClubWorkspace();
   } catch {
     return (
       <Container className="py-12">
@@ -63,7 +61,7 @@ export default async function MyClubPage() {
     );
   }
 
-  if (workspace.state === "anonymous") redirect("/login?next=%2Fmy-club");
+  if (workspace.workspace.state === "anonymous") redirect("/login?next=%2Fmy-club");
 
   /*
    * Everything short of owning a club is a *state of the workflow*, not an
@@ -72,7 +70,7 @@ export default async function MyClubPage() {
    * action is, rather than the single "no club assigned" dead end this page
    * used to show for all three.
    */
-  if (workspace.state !== "approved") {
+  if (workspace.workspace.state !== "approved") {
     const registerCta = (
       <ButtonLink href="/clubs/register">{myClub("registerClub")}</ButtonLink>
     );
@@ -80,17 +78,17 @@ export default async function MyClubPage() {
       <>
         <PageHeader eyebrow={myClub("eyebrow")} title={myClub("title")} />
         <Container width="narrow" className="py-10 sm:py-12">
-          {workspace.state === "noRegistration" && (
+          {workspace.workspace.state === "noRegistration" && (
             <EmptyState
               title={myClub("noRegistrationTitle")}
               body={myClub("noRegistrationBody")}
               action={registerCta}
             />
           )}
-          {workspace.state === "pending" && (
+          {workspace.workspace.state === "pending" && (
             <RegistrationStatusPanel
               status="pending"
-              registration={workspace.registration}
+              registration={workspace.workspace.registration}
               labels={{
                 title: myClub("pendingTitle"),
                 body: myClub("pendingBody"),
@@ -102,10 +100,10 @@ export default async function MyClubPage() {
               locale={locale}
             />
           )}
-          {workspace.state === "rejected" && (
+          {workspace.workspace.state === "rejected" && (
             <RegistrationStatusPanel
               status="rejected"
-              registration={workspace.registration}
+              registration={workspace.workspace.registration}
               labels={{
                 title: myClub("rejectedTitle"),
                 body: myClub("rejectedBody"),
@@ -123,12 +121,8 @@ export default async function MyClubPage() {
     );
   }
 
-  const { owner, club } = workspace;
-
-  const [members, documents] = await Promise.all([
-    listClubMembers(club.id),
-    listRegistrationDocumentsForClub(club.id),
-  ]);
+  const { owner, club } = workspace.workspace;
+  const { members, documents } = workspace;
   const byRole = (role: ClubMemberRole) => members.filter((m) => m.member_role === role);
   const players = byRole("player");
   const coachStaff = [...byRole("coach"), ...byRole("staff")];

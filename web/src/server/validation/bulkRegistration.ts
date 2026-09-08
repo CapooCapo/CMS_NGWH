@@ -13,6 +13,10 @@ export function parseBulkRegistrationAction(body: Record<string, unknown>): {
   const action = body.action;
   const ids = body.ids;
 
+  for (const key of Object.keys(body)) {
+    if (key !== "action" && key !== "ids" && key !== "confirmation") errors[key] = "unexpected";
+  }
+
   if (!ACTIONS.includes(action as BulkRegistrationAction)) errors.action = "invalidChoice";
   if (!Array.isArray(ids) || ids.length === 0 || ids.length > MAX_BULK_IDS) {
     errors.ids = "invalidChoice";

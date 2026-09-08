@@ -24,6 +24,7 @@ export function OwnerLoginForm({
     submit: string;
     submitting: string;
     invalidCredentials: string;
+    rateLimited: string;
     serverError: string;
     noAccount: string;
     signUp: string;
@@ -56,7 +57,13 @@ export function OwnerLoginForm({
         router.refresh();
         return;
       }
-      setError(response.status === 401 ? labels.invalidCredentials : labels.serverError);
+      setError(
+        response.status === 401
+          ? labels.invalidCredentials
+          : response.status === 429
+            ? labels.rateLimited
+            : labels.serverError
+      );
     } catch {
       setError(labels.serverError);
     } finally {

@@ -7,6 +7,7 @@ import {
 import { parseClubMember } from "@/server/validation/admin";
 import { fail, notFound, ok, parseId } from "@/server/api/respond";
 import { readJson } from "@/server/validation/validate";
+import { auditedAdminMutation } from "@/server/security/adminAudit";
 
 /** REQ-CLUB-005 — roster and coaching staff maintenance. */
 export async function GET(
@@ -36,7 +37,14 @@ export async function POST(
     // Confirm the club exists first so the response is 404 rather than a
     // foreign-key 409.
     if (!(await findClubById(id))) return notFound();
-    const member = await createClubMember(id, parseClubMember(await readJson(request)));
+    const input = parseClubMember(await readJson(request));
+    const member = await auditedAdminMutation(
+      request,
+      (created) => ({ actorId: guard.admin.id, action: "club.member.create", resourceType: "club_member", resourceId: created?.id ?? "new", metadata: { clubId: id } }),
+      () => createClubMember(id, input),
+      Boolean
+    );
+    if (!member) throw new Error("club member creation returned no record");
     return ok({ member }, 201);
   } catch (error) {
     return fail("create club member", error);

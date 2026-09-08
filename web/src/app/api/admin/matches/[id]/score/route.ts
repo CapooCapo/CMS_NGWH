@@ -4,6 +4,7 @@ import { parseScore, parseScoreAdjustment } from "@/server/validation/admin";
 import { fail, notFound, ok, parseId } from "@/server/api/respond";
 import { NextResponse } from "next/server";
 import { readJson } from "@/server/validation/validate";
+import { auditedAdminMutation } from "@/server/security/adminAudit";
 
 /**
  * Live scoreboard update (REQ-HOME-005 feed).
@@ -25,7 +26,12 @@ export async function POST(
     const body = await readJson(request);
     if ("team" in body || "side" in body || "delta" in body || "kind" in body) {
       const input = parseScoreAdjustment(body);
-      const result = await adjustLiveMatch(id, input.team, input.kind, input.delta);
+      const result = await auditedAdminMutation(
+        request,
+        { actorId: guard.admin.id, action: "match.score.update", resourceType: "match", resourceId: id, metadata: { kind: input.kind, team: input.team } },
+        () => adjustLiveMatch(id, input.team, input.kind, input.delta),
+        (update) => Boolean(update.match)
+      );
       if (result.scoreRejected) {
         return NextResponse.json({ error: "scoreOutOfRange" }, { status: 409 });
       }
@@ -33,12 +39,17 @@ export async function POST(
       return ok({ match: result.match });
     }
     const input = parseScore(body);
-    const match = await updateLiveScore(
-      id,
-      input.homeScore,
-      input.awayScore,
-      input.status,
-      input.period
+    const match = await auditedAdminMutation(
+      request,
+      { actorId: guard.admin.id, action: "match.score.update", resourceType: "match", resourceId: id, metadata: { changed: ["homeScore", "awayScore", "status", "period"] } },
+      () => updateLiveScore(
+        id,
+        input.homeScore,
+        input.awayScore,
+        input.status,
+        input.period
+      ),
+      Boolean
     );
     if (!match) return notFound();
     return ok({ match });

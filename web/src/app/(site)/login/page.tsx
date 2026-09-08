@@ -31,6 +31,7 @@ export default async function LoginPage() {
           submit: t("submit"),
           submitting: t("submitting"),
           invalidCredentials: t("invalidCredentials"),
+          rateLimited: t("rateLimited"),
           serverError: t("serverError"),
           noAccount: t("noAccount"),
           signUp: t("signUp"),

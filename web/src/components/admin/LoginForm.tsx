@@ -43,6 +43,8 @@ export function LoginForm({ next }: { next: string }) {
       setError(
         response.status === 401
           ? t("invalidCredentials")
+          : response.status === 429
+            ? t("rateLimited")
           : t("failed")
       );
     } catch {

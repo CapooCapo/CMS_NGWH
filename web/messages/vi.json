@@ -320,6 +320,7 @@
     "submit": "Đăng nhập",
     "submitting": "Đang đăng nhập",
     "invalidCredentials": "Email hoặc mật khẩu không đúng.",
+    "rateLimited": "Có quá nhiều lần đăng nhập. Vui lòng thử lại sau.",
     "serverError": "Đăng nhập thất bại. Vui lòng thử lại.",
     "noAccount": "Chưa có tài khoản?",
     "signUp": "Đăng ký tài khoản"
@@ -548,7 +549,10 @@
       "subtitle": "Chỉ dành cho nhân sự được ủy quyền.",
       "username": "Tên đăng nhập",
       "password": "Mật khẩu",
+      "signIn": "Đăng nhập",
+      "signingIn": "Đang đăng nhập",
       "invalidCredentials": "Tên đăng nhập hoặc mật khẩu không đúng.",
+      "rateLimited": "Có quá nhiều lần đăng nhập. Vui lòng thử lại sau.",
       "failed": "Đăng nhập thất bại. Vui lòng thử lại."
     },
     "forms": {

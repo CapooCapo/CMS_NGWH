@@ -46,6 +46,31 @@ export class Validator {
     if (!(field in this.errors)) this.errors[field] = code;
   }
 
+  /** Rejects payload keys that are not part of this endpoint's contract. */
+  only(fields: readonly string[]): void {
+    for (const field of Object.keys(this.data)) {
+      if (!fields.includes(field)) this.fail(field, "unexpected");
+    }
+  }
+
+  /** Bounded homogeneous array, for batch endpoints before data reaches a service. */
+  array(field: string, { required = false, max = 100 } = {}): unknown[] | null {
+    const value = this.raw(field);
+    if (value === undefined || value === null) {
+      if (required) this.fail(field, "required");
+      return null;
+    }
+    if (!Array.isArray(value)) {
+      this.fail(field, "invalid");
+      return null;
+    }
+    if (value.length > max) {
+      this.fail(field, "tooLong");
+      return null;
+    }
+    return value;
+  }
+
   /** Trimmed string. `max` guards against unbounded payloads reaching the DB. */
   string(
     field: string,

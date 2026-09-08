@@ -20,13 +20,14 @@ export type BulkRegistrationResult = {
  */
 export async function applyBulkRegistrationAction(
   ids: readonly number[],
-  action: BulkRegistrationAction
+  action: BulkRegistrationAction,
+  afterSuccess?: (id: number) => Promise<void>
 ): Promise<BulkRegistrationResult[]> {
   const results: BulkRegistrationResult[] = [];
 
   for (const id of ids) {
     if (action === "approve") {
-      const result = await approveRegistration(id);
+      const result = await approveRegistration(id, async () => afterSuccess?.(id));
       results.push(
         result.kind === "approved"
           ? { id, ok: true }
@@ -36,7 +37,7 @@ export async function applyBulkRegistrationAction(
     }
 
     if (action === "reject") {
-      const result = await rejectRegistration(id);
+      const result = await rejectRegistration(id, async () => afterSuccess?.(id));
       results.push(
         result.kind === "rejected"
           ? { id, ok: true }
@@ -45,7 +46,7 @@ export async function applyBulkRegistrationAction(
       continue;
     }
 
-    const result = await deleteRegistration(id);
+    const result = await deleteRegistration(id, async () => afterSuccess?.(id));
     results.push(
       result.kind === "deleted"
         ? { id, ok: true }

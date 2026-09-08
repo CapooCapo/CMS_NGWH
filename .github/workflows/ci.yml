@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ngwh_test
+          POSTGRES_PASSWORD: ngwh_test
+          POSTGRES_DB: ngwh_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ngwh_test -d ngwh_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: web
+
+    env:
+      DATABASE_URL: postgresql://ngwh_test:ngwh_test@localhost:5432/ngwh_test
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply test database migrations
+        run: node scripts/migrate.mjs
+
+      - name: Seed test admin
+        env:
+          ADMIN_BOOTSTRAP: ci-admin
+          ADMIN_BOOTSTRAP_PASSWORD: ci-test-only-password
+          ADMIN_BOOTSTRAP_ROLE: admin
+        run: node scripts/create-admin.mjs
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run type check
+        run: npx tsc --noEmit
+
+      - name: Build production application
+        run: npm run build

@@ -1,4 +1,5 @@
 import { subscribeLiveMatches, type LiveMatchEvent } from "@/server/liveEvents";
+import { routeHandler } from "@/server/http/routeHandler";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +13,8 @@ function encodeEvent(event: LiveMatchEvent) {
 }
 
 /** Public transport only: match mutation and authorization stay in admin routes. */
-export function GET(request: Request) {
+export async function GET(request: Request) {
+  return routeHandler("live events", async () => {
   let unsubscribe: (() => void) | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let closed = false;
@@ -56,5 +58,6 @@ export function GET(request: Request) {
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
     },
+  });
   });
 }

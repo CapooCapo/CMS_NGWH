@@ -5,6 +5,8 @@ import {
 } from "@/server/repositories/registrations";
 import { fail, notFound, ok, parseId } from "@/server/api/respond";
 import { readJson } from "@/server/validation/validate";
+import { Validator } from "@/server/validation/validate";
+import { auditedAdminMutation } from "@/server/security/adminAudit";
 
 /**
  * REQ-REG-003 — serves an uploaded document to reviewers.
@@ -66,8 +68,16 @@ export async function PATCH(
 
   try {
     const body = await readJson(request);
+    const v = new Validator(body);
+    v.only(["isPublic"]);
+    v.assert();
     const isPublic = body.isPublic === true;
-    const doc = await setDocumentVisibility(id, documentId, isPublic);
+    const doc = await auditedAdminMutation(
+      request,
+      { actorId: guard.admin.id, action: "registration.document.visibility.update", resourceType: "registration_document", resourceId: documentId, metadata: { registrationId: id, isPublic } },
+      () => setDocumentVisibility(id, documentId, isPublic),
+      Boolean
+    );
     if (!doc) return notFound();
     return ok({ document: doc });
   } catch (error) {

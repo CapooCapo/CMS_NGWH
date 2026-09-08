@@ -7,6 +7,7 @@ import { updateLiveMatch } from "@/server/services/liveMatchUpdates";
 import { parseMatch } from "@/server/validation/admin";
 import { fail, notFound, ok, parseId } from "@/server/api/respond";
 import { readJson } from "@/server/validation/validate";
+import { auditedAdminMutation } from "@/server/security/adminAudit";
 
 export async function GET(
   _request: Request,
@@ -34,7 +35,13 @@ export async function PATCH(
   const id = parseId((await params).id);
   if (!id) return notFound();
   try {
-    const match = await updateLiveMatch(id, parseMatch(await readJson(request)));
+    const input = parseMatch(await readJson(request));
+    const match = await auditedAdminMutation(
+      request,
+      { actorId: guard.admin.id, action: "match.update", resourceType: "match", resourceId: id, metadata: { changed: Object.keys(input) } },
+      () => updateLiveMatch(id, input),
+      Boolean
+    );
     if (!match) return notFound();
     return ok({ match });
   } catch (error) {
@@ -43,7 +50,7 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   // Destructive, so `admin` only — an editor can edit but not delete a fixture.
@@ -52,7 +59,13 @@ export async function DELETE(
   const id = parseId((await params).id);
   if (!id) return notFound();
   try {
-    if (!(await deleteMatch(id))) return notFound();
+    const deleted = await auditedAdminMutation(
+      request,
+      { actorId: guard.admin.id, action: "match.delete", resourceType: "match", resourceId: id },
+      () => deleteMatch(id),
+      Boolean
+    );
+    if (!deleted) return notFound();
     return ok({ ok: true });
   } catch (error) {
     return fail("delete match", error);

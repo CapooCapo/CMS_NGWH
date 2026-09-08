@@ -12,6 +12,14 @@ import {
   purgeExpiredOwnerSessions,
 } from "@/server/auth/ownerSession";
 import { Validator, ValidationError, readJson } from "@/server/validation/validate";
+import {
+  checkLoginLimit,
+  clearSuccessfulLogin,
+  clientIp,
+  LoginRateLimitUnavailable,
+  normalizedLoginAccount,
+  recordFailedLogin,
+} from "@/server/security/loginRateLimit";
 
 /**
  * Club Owner login.
@@ -32,17 +40,36 @@ export async function POST(request: Request) {
   try {
     const body = await readJson(request);
     const v = new Validator(body);
+    v.only(["email", "password"]);
     const email = v.email("email", { required: true }) ?? "";
     const password = v.string("password", { required: true, max: 200 }) ?? "";
     v.assert();
+
+    const ip = clientIp(request);
+    const accountKey = normalizedLoginAccount(email);
+    const existingLimit = await checkLoginLimit(ip, accountKey);
+    if (existingLimit.locked) {
+      return NextResponse.json(
+        { error: "tooManyRequests" },
+        { status: 429, headers: { "Retry-After": String(existingLimit.retryAfterSeconds) } }
+      );
+    }
 
     const owner = await findClubOwnerByEmailWithHash(email);
     const passwordOk = await verifyPassword(password, owner?.password_hash ?? DUMMY_HASH);
 
     if (!owner || !passwordOk || !owner.is_active) {
+      const limit = await recordFailedLogin(ip, accountKey);
+      if (limit.locked) {
+        return NextResponse.json(
+          { error: "tooManyRequests" },
+          { status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) } }
+        );
+      }
       return NextResponse.json({ error: "invalidCredentials" }, { status: 401 });
     }
 
+    await clearSuccessfulLogin(accountKey);
     const { token, expiresAt } = await createOwnerSession(owner.id);
     await recordOwnerLogin(owner.id);
     void purgeExpiredOwnerSessions().catch(() => {});
@@ -52,6 +79,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ owner: { id: owner.id, email: owner.email }, redirectTo: "/clubs" });
   } catch (error) {
+    if (error instanceof LoginRateLimitUnavailable) {
+      return NextResponse.json({ error: "server" }, { status: 503 });
+    }
     if (error instanceof ValidationError) {
       return NextResponse.json(
         { error: "validation", fields: error.errors },

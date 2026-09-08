@@ -320,6 +320,7 @@
     "submit": "Sign in",
     "submitting": "Signing in",
     "invalidCredentials": "Incorrect email or password.",
+    "rateLimited": "Too many sign-in attempts. Please try again later.",
     "serverError": "Sign-in failed. Please try again.",
     "noAccount": "Don't have an account?",
     "signUp": "Create an account"
@@ -548,7 +549,10 @@
       "subtitle": "Authorized personnel only.",
       "username": "Username",
       "password": "Password",
+      "signIn": "Sign in",
+      "signingIn": "Signing in",
       "invalidCredentials": "Incorrect username or password.",
+      "rateLimited": "Too many sign-in attempts. Please try again later.",
       "failed": "Sign-in failed. Please try again."
     },
     "forms": {

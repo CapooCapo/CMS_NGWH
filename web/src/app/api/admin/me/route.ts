@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/server/auth/guard";
+import { currentAdmin } from "@/server/auth/session";
+import { errorResponse } from "@/server/http/errors";
+import { routeHandler } from "@/server/http/routeHandler";
 
 /** Current staff identity; 401 when not signed in. */
 export async function GET() {
-  const guard = await requireAdmin();
-  if (!guard.ok) return guard.response;
-  return NextResponse.json({ user: guard.admin });
+  return routeHandler("admin me", async () => {
+    const admin = await currentAdmin();
+    if (!admin) return errorResponse(401, "UNAUTHENTICATED");
+    return NextResponse.json({ user: admin });
+  });
 }

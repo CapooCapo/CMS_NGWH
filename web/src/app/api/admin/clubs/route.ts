@@ -3,6 +3,7 @@ import { createClub, listClubs } from "@/server/repositories/clubs";
 import { parseClub } from "@/server/validation/admin";
 import { fail, ok } from "@/server/api/respond";
 import { readJson } from "@/server/validation/validate";
+import { auditedAdminMutation } from "@/server/security/adminAudit";
 
 /** Admin club list — unlike the public directory this includes unapproved clubs. */
 export async function GET(request: Request) {
@@ -26,7 +27,14 @@ export async function POST(request: Request) {
   const guard = await requireRole();
   if (!guard.ok) return guard.response;
   try {
-    const club = await createClub(parseClub(await readJson(request)));
+    const input = parseClub(await readJson(request));
+    const club = await auditedAdminMutation(
+      request,
+      (created) => ({ actorId: guard.admin.id, action: "club.create", resourceType: "club", resourceId: created?.id ?? "new" }),
+      () => createClub(input),
+      Boolean
+    );
+    if (!club) throw new Error("club creation returned no record");
     return ok({ club }, 201);
   } catch (error) {
     return fail("create club", error);

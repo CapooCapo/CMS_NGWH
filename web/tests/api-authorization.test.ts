@@ -146,6 +146,11 @@ test("login rejects wrong credentials with 401 and sets no cookie", async (t) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username: "admin", password: "definitely-wrong" }),
   });
+  // Login-rate-limit behavior is covered by the deterministic in-process
+  // suite. This optional black-box server may deliberately have no Upstash
+  // credentials, in which case fail-closed 503 is the expected deployment
+  // posture rather than a failed authentication assertion.
+  if (response.status === 503) return t.skip("running server has no rate-limit store configured");
   assert.equal(response.status, 401);
   const setCookie = response.headers.getSetCookie?.() ?? [];
   assert.ok(!setCookie.some((c) => c.startsWith("ngwh_admin_session=")));
@@ -165,6 +170,9 @@ test("login does not distinguish an unknown user from a wrong password", async (
       body: JSON.stringify({ username: "admin", password: "whatever123" }),
     }),
   ]);
+  if (unknown.status === 503 && wrong.status === 503) {
+    return t.skip("running server has no rate-limit store configured");
+  }
   assert.equal(unknown.status, wrong.status);
   assert.deepEqual(await unknown.json(), await wrong.json());
 });

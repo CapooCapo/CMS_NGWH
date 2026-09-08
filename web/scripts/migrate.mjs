@@ -9,7 +9,10 @@ if (!url) {
   process.exit(1)
 }
 const dir = path.join(process.cwd(), 'src/server/migrations')
-const client = new pg.Client({connectionString: url})
+const client = new pg.Client({
+  connectionString: url,
+  ...(process.env.DB_SSL === 'true' ? {ssl: {rejectUnauthorized: true}} : {}),
+})
 await client.connect()
 await client.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
   name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`)

@@ -4,6 +4,7 @@ import { listClubMembers } from "@/server/repositories/clubs";
 import { parseClub } from "@/server/validation/admin";
 import { fail, notFound, ok, parseId } from "@/server/api/respond";
 import { readJson } from "@/server/validation/validate";
+import { auditedAdminMutation } from "@/server/security/adminAudit";
 
 export async function GET(
   _request: Request,
@@ -31,7 +32,16 @@ export async function PATCH(
   const id = parseId((await params).id);
   if (!id) return notFound();
   try {
-    const club = await updateClub(id, parseClub(await readJson(request)));
+    const input = parseClub(await readJson(request));
+    const club = await auditedAdminMutation(
+      request,
+      {
+        actorId: guard.admin.id, action: "club.update", resourceType: "club", resourceId: id,
+        metadata: { changed: Object.keys(input) },
+      },
+      () => updateClub(id, input),
+      Boolean
+    );
     if (!club) return notFound();
     return ok({ club });
   } catch (error) {
@@ -41,7 +51,7 @@ export async function PATCH(
 
 /** Finalizes an owner's pending deletion request. */
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const guard = await requireRole();
@@ -49,7 +59,13 @@ export async function DELETE(
   const id = parseId((await params).id);
   if (!id) return notFound();
   try {
-    if (!(await deleteRequestedClub(id))) return notFound();
+    const deleted = await auditedAdminMutation(
+      request,
+      { actorId: guard.admin.id, action: "club.delete", resourceType: "club", resourceId: id },
+      () => deleteRequestedClub(id),
+      Boolean
+    );
+    if (!deleted) return notFound();
     return ok({ deleted: true });
   } catch (error) {
     return fail("delete requested club", error);

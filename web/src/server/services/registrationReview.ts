@@ -74,7 +74,8 @@ function slugify(value: string): string {
 }
 
 export async function approveRegistration(
-  registrationId: number
+  registrationId: number,
+  afterSuccess?: (result: Extract<ApprovalResult, { kind: "approved" }>) => Promise<void>
 ): Promise<ApprovalResult> {
   return transaction(async (client) => {
     const { rows: found } = await client.query<ClubRegistration>(
@@ -88,11 +89,13 @@ export async function approveRegistration(
     // Terminal decisions are immutable. Repeating the same action is a true
     // no-op: return the stored outcome without replacing its timestamp.
     if (registration.status === "approved") {
-      return {
+      const result = {
         kind: "approved",
         registration,
         clubId: registration.club_id,
-      };
+      } as const;
+      await afterSuccess?.(result);
+      return result;
     }
     if (registration.status !== "pending") {
       return { kind: "invalidReviewTransition" };
@@ -214,12 +217,15 @@ export async function approveRegistration(
         RETURNING ${REGISTRATION_COLUMNS}`,
       [registrationId, clubId]
     );
-    return { kind: "approved", registration: updated[0], clubId };
+    const result = { kind: "approved", registration: updated[0], clubId } as const;
+    await afterSuccess?.(result);
+    return result;
   });
 }
 
 export async function rejectRegistration(
-  registrationId: number
+  registrationId: number,
+  afterSuccess?: (result: Extract<RejectionResult, { kind: "rejected" }>) => Promise<void>
 ): Promise<RejectionResult> {
   return transaction(async (client) => {
     const { rows: found } = await client.query<ClubRegistration>(
@@ -230,7 +236,9 @@ export async function rejectRegistration(
     const registration = found[0];
     if (!registration) return { kind: "notFound" };
     if (registration.status === "rejected") {
-      return { kind: "rejected", registration };
+      const result = { kind: "rejected", registration } as const;
+      await afterSuccess?.(result);
+      return result;
     }
     if (registration.status !== "pending") {
       return { kind: "invalidReviewTransition" };
@@ -243,7 +251,9 @@ export async function rejectRegistration(
         RETURNING ${REGISTRATION_COLUMNS}`,
       [registrationId]
     );
-    return { kind: "rejected", registration: rows[0] };
+    const result = { kind: "rejected", registration: rows[0] } as const;
+    await afterSuccess?.(result);
+    return result;
   });
 }
 
@@ -255,7 +265,8 @@ export async function rejectRegistration(
  * competition and ownership records, so retention needs an explicit policy.
  */
 export async function deleteRegistration(
-  registrationId: number
+  registrationId: number,
+  afterSuccess?: () => Promise<void>
 ): Promise<RegistrationDeletionResult> {
   return transaction(async (client) => {
     const { rows } = await client.query<{ status: RegistrationStatus }>(
@@ -267,6 +278,7 @@ export async function deleteRegistration(
     if (registration.status === "approved") return { kind: "deletionNotAllowed" };
 
     await client.query("DELETE FROM club_registrations WHERE id = $1", [registrationId]);
+    await afterSuccess?.();
     return { kind: "deleted" };
   });
 }

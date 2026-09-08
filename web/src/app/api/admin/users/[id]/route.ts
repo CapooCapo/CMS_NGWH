@@ -12,6 +12,8 @@ import {
 } from "@/server/repositories/adminUsers";
 import { fail, notFound, ok, parseId } from "@/server/api/respond";
 import { Validator, readJson } from "@/server/validation/validate";
+import { auditAdminMutation } from "@/server/security/adminAudit";
+import { transaction } from "@/server/db/pool";
 
 /**
  * Update one staff account: activate/deactivate and/or change role.
@@ -44,6 +46,7 @@ export async function PATCH(
   try {
     const body = await readJson(request);
     const v = new Validator(body);
+    v.only(["role", "isActive"]);
 
     /*
      * `role` is optional: this endpoint handles both activation and role
@@ -69,6 +72,7 @@ export async function PATCH(
     const actor = { id: guard.admin.id, role: guard.admin.role };
     const targetRef = { id: target.id, role: target.role };
 
+    return await transaction(async () => {
     if (nextRole) {
       // Self-role-change is refused outright: a superadmin demoting themselves
       // is the fastest way to lose control of the system, and an admin
@@ -84,7 +88,13 @@ export async function PATCH(
           ? notFound()
           : denyResponse(result.reason as never);
       }
-      if (!hasActive) return ok({ user: result.user });
+      if (!hasActive) {
+        await auditAdminMutation(request, {
+          actorId: guard.admin.id, action: "role.assign", resourceType: "admin_user", resourceId: id,
+          metadata: { from: target.role, to: nextRole },
+        });
+        return ok({ user: result.user });
+      }
     }
 
     if (hasActive) {
@@ -109,10 +119,17 @@ export async function PATCH(
           ? notFound()
           : denyResponse(result.reason as never);
       }
+      await auditAdminMutation(request, {
+        actorId: guard.admin.id,
+        action: nextRole ? "role.assign" : "admin_user.active.update",
+        resourceType: "admin_user", resourceId: id,
+        metadata: nextRole ? { from: target.role, to: nextRole, isActive } : { isActive },
+      });
       return ok({ user: result.user });
     }
 
     return notFound();
+    });
   } catch (error) {
     return fail("update admin user", error);
   }

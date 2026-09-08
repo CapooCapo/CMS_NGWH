@@ -1,5 +1,6 @@
 import "server-only";
 import { Client } from "pg";
+import { databaseConnectionOptions } from "@/server/db/options";
 import { findMatchById } from "@/server/repositories/matches";
 import type { MatchWithContext } from "@/server/repositories/types";
 import { LIVE_MATCH_CHANNEL } from "@/server/services/liveMatchUpdates";
@@ -67,7 +68,7 @@ async function ensureListener(): Promise<void> {
   if (!connectionString) return;
 
   registry.connecting = (async () => {
-    const client = new Client({ connectionString });
+    const client = new Client(databaseConnectionOptions(connectionString));
     client.on("notification", (notification) => {
       if (notification.channel !== LIVE_MATCH_CHANNEL || !notification.payload) return;
       try {

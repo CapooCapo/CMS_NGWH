@@ -3,6 +3,7 @@ import { fail, ok } from "@/server/api/respond";
 import { applyBulkRegistrationAction } from "@/server/services/bulkRegistrationActions";
 import { parseBulkRegistrationAction } from "@/server/validation/bulkRegistration";
 import { readJson } from "@/server/validation/validate";
+import { auditAdminMutation } from "@/server/security/adminAudit";
 
 /** Admin-only orchestration for independent, state-safe registration actions. */
 export async function POST(request: Request) {
@@ -11,7 +12,11 @@ export async function POST(request: Request) {
 
   try {
     const { action, ids } = parseBulkRegistrationAction(await readJson(request));
-    const results = await applyBulkRegistrationAction(ids, action);
+    const results = await applyBulkRegistrationAction(ids, action, async (id) => {
+      await auditAdminMutation(request, {
+        actorId: guard.admin.id, action: `registration.bulk.${action}`, resourceType: "registration", resourceId: id,
+      });
+    });
     const succeeded = results.filter((result) => result.ok).map((result) => result.id);
     const failed = results
       .filter((result) => !result.ok)

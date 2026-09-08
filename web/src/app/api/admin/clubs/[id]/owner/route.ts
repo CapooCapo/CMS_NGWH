@@ -6,6 +6,7 @@ import {
 import { hashPassword } from "@/server/auth/password";
 import { fail, notFound, ok, parseId } from "@/server/api/respond";
 import { Validator, readJson } from "@/server/validation/validate";
+import { auditedAdminMutation } from "@/server/security/adminAudit";
 
 /**
  * Admin creates and assigns a Club Owner account for one club — the
@@ -30,22 +31,25 @@ export async function POST(
   try {
     const body = await readJson(request);
     const v = new Validator(body);
+    v.only(["email", "password"]);
     const email = v.email("email", { required: true }) ?? "";
     // Same 10-char minimum as staff accounts (see /api/admin/users).
     const password = v.string("password", { required: true, min: 10, max: 200 }) ?? "";
     v.assert();
 
-    const result = await createAndAssignClubOwner(id, {
-      email,
-      passwordHash: await hashPassword(password),
-    });
+    const passwordHash = await hashPassword(password);
+    const result = await auditedAdminMutation(
+      request,
+      (assigned) => ({ actorId: guard.admin.id, action: "club.owner.assign", resourceType: "club", resourceId: id, metadata: assigned.ok ? { ownerId: assigned.owner.id } : undefined }),
+      () => createAndAssignClubOwner(id, { email, passwordHash }),
+      (assigned) => assigned.ok
+    );
 
     if (!result.ok) {
       if (result.reason === "clubNotFound") return notFound();
       // clubAlreadyOwned / emailTaken — both a conflict with existing state.
       return Response.json({ error: result.reason }, { status: 409 });
     }
-
     return ok({ owner: result.owner }, 201);
   } catch (error) {
     return fail("assign club owner", error);
@@ -54,7 +58,7 @@ export async function POST(
 
 /** Unassigns the club's current owner (the account itself is deactivated, not deleted). */
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const guard = await requireRole();
@@ -64,7 +68,12 @@ export async function DELETE(
   if (!id) return notFound();
 
   try {
-    const result = await unassignClubOwner(id);
+    const result = await auditedAdminMutation(
+      request,
+      { actorId: guard.admin.id, action: "club.owner.remove", resourceType: "club", resourceId: id },
+      () => unassignClubOwner(id),
+      (removed) => removed.ok
+    );
     if (!result.ok) return notFound();
     return ok({ club: result.club });
   } catch (error) {

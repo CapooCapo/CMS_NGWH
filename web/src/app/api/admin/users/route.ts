@@ -12,6 +12,7 @@ import {
 import { hashPassword } from "@/server/auth/password";
 import { fail, ok } from "@/server/api/respond";
 import { Validator, readJson } from "@/server/validation/validate";
+import { auditedAdminMutation } from "@/server/security/adminAudit";
 
 /**
  * Staff account management.
@@ -47,6 +48,7 @@ export async function POST(request: Request) {
   try {
     const body = await readJson(request);
     const v = new Validator(body);
+    v.only(["username", "email", "password", "role"]);
     const username = v.string("username", { required: true, min: 3, max: 64 }) ?? "";
     const email = v.email("email");
     // 10 chars minimum, matching the CLI bootstrap script.
@@ -68,12 +70,17 @@ export async function POST(request: Request) {
     const decision = canCreateUser(guard.admin.role, role);
     if (!decision.allowed) return denyResponse(decision.reason);
 
-    const user = await createAdminUser({
-      username,
-      email,
-      passwordHash: await hashPassword(password),
-      role,
-    });
+    const passwordHash = await hashPassword(password);
+    const user = await auditedAdminMutation(
+      request,
+      (created) => ({
+        actorId: guard.admin.id, action: "admin_user.create", resourceType: "admin_user",
+        resourceId: created?.id ?? "new", metadata: { role: created?.role ?? role },
+      }),
+      () => createAdminUser({ username, email, passwordHash, role }),
+      Boolean
+    );
+    if (!user) throw new Error("admin user creation returned no record");
     // The hash is never returned.
     return ok({ user }, 201);
   } catch (error) {

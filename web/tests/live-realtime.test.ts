@@ -15,6 +15,7 @@ const TAG = `test-live-realtime-${process.pid}`;
 let seasonId: number;
 let matchId: number;
 let listener: Client;
+let notificationsSupported = false;
 
 function notification(timeout = 1_000) {
   return new Promise<{ matchId: number; revision: number } | null>((resolve) => {
@@ -42,6 +43,16 @@ before(async () => {
   listener = new Client({ connectionString: process.env.DATABASE_URL });
   await listener.connect();
   await listener.query(`LISTEN ${LIVE_MATCH_CHANNEL}`);
+  // Some managed/pooler endpoints accept LISTEN but do not forward NOTIFY
+  // messages between connections. Probe that capability directly so this
+  // integration suite does not misreport an infrastructure limitation as an
+  // application regression.
+  const received = notification();
+  await query("SELECT pg_notify($1, $2)", [
+    LIVE_MATCH_CHANNEL,
+    JSON.stringify({ matchId: 0, revision: 0 }),
+  ]);
+  notificationsSupported = (await received)?.matchId === 0;
 });
 
 after(async () => {
@@ -50,14 +61,15 @@ after(async () => {
   await pool.end();
 });
 
-test("committed score updates increment revision and publish one match notification", async () => {
-  const received = notification();
+test("committed score updates increment revision and publish one match notification", async (t) => {
+  const received = notificationsSupported ? notification() : null;
   const match = await updateLiveScore(matchId, 44, 39, "live", "Q3");
   assert.ok(match);
   assert.equal(match.live_revision, 1);
   assert.equal(match.home_score, 44);
   assert.equal(match.home_fouls, 0);
   assert.equal(match.away_fouls, 0);
+  if (!received) return t.skip("configured PostgreSQL endpoint does not forward LISTEN/NOTIFY");
   assert.deepEqual(await received, { matchId, revision: 1 });
 });
 
@@ -90,14 +102,15 @@ test("all supported score deltas are atomic and concurrent clicks lose no points
   assert.deepEqual(row, { home_score: 49, away_score: 39, live_revision: 10 });
 });
 
-test("team fouls use the same revision/event path and cannot become negative", async () => {
+test("team fouls use the same revision/event path and cannot become negative", async (t) => {
   const rejected = await adjustLiveMatch(matchId, "home", "foul", -1);
   assert.deepEqual(rejected, { match: null, scoreRejected: true });
 
-  const received = notification();
+  const received = notificationsSupported ? notification() : null;
   const homeUp = await adjustLiveMatch(matchId, "home", "foul", 1);
   assert.equal(homeUp.match?.home_fouls, 1);
   assert.equal(homeUp.match?.away_fouls, 0);
+  if (!received) return t.skip("configured PostgreSQL endpoint does not forward LISTEN/NOTIFY");
   assert.deepEqual(await received, { matchId, revision: 11 });
 
   const awayUp = await adjustLiveMatch(matchId, "away", "foul", 1);
