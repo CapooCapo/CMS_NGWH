@@ -9,6 +9,11 @@ import { parsePage } from "@/lib/pagination";
 import { isPrivileged } from "@/server/auth/permissions";
 import { currentAdmin } from "@/server/auth/session";
 import { listAdminAuditLogs, type AdminAuditLog } from "@/server/repositories/adminAuditLogs";
+import type { PageSearchParams } from "@/app/page-props";
+
+type PageProps = {
+  searchParams: PageSearchParams;
+};
 
 export async function generateMetadata(): Promise<Metadata> {
   const [metaT, t] = await Promise.all([
@@ -30,7 +35,7 @@ function metadataSummary(metadata: AdminAuditLog["metadata"], empty: string): st
 /** Privileged, server-rendered, read-only history of administrative changes. */
 export default async function AdminAuditLogsPage({
   searchParams,
-}: PageProps<"/admin/audit-logs">) {
+}: PageProps) {
   const [t, locale, admin] = await Promise.all([
     getTranslations("admin.auditLogs"),
     getLocale(),

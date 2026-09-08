@@ -17,6 +17,11 @@ import { listAdminClubs, listClubMembers } from "@/server/repositories/clubs";
 import { findClubOwnerById } from "@/server/repositories/clubOwners";
 import { SOCIAL_LINK_FIELDS } from "@/lib/clubSocialLinks";
 import { PLAYER_POSITIONS, STAFF_ROLES } from "@/lib/clubMembers";
+import type { PageSearchParams } from "@/app/page-props";
+
+type PageProps = {
+  searchParams: PageSearchParams;
+};
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("admin.clubs");
@@ -43,7 +48,7 @@ export async function generateMetadata(): Promise<Metadata> {
  */
 export default async function AdminClubsPage({
   searchParams,
-}: PageProps<"/admin/clubs">) {
+}: PageProps) {
   const t = await getTranslations("admin.clubs");
   const memberPositionLabels = {
     PG: t("members.positionPG"),

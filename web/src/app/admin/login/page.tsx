@@ -3,6 +3,11 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { LoginForm } from "@/components/admin/LoginForm";
 import { currentAdmin } from "@/server/auth/session";
+import type { PageSearchParams } from "@/app/page-props";
+
+type PageProps = {
+  searchParams: PageSearchParams;
+};
 
 export async function generateMetadata(): Promise<Metadata> {
   const [metaT, t] = await Promise.all([
@@ -19,7 +24,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function AdminLoginPage({
   searchParams,
-}: PageProps<"/admin/login">) {
+}: PageProps) {
   // Already signed in — skip the form.
   if (await currentAdmin()) redirect("/admin/dashboard");
 

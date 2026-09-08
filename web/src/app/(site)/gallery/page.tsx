@@ -15,6 +15,11 @@ import { absoluteUrl } from "@/lib/site";
 import { client } from "@/sanity/client";
 import { urlForImage } from "@/sanity/image";
 import { GALLERY_ITEMS_QUERY } from "@/sanity/queries";
+import type { PageSearchParams } from "@/app/page-props";
+
+type PageProps = {
+  searchParams: PageSearchParams;
+};
 
 const options = { next: { revalidate: 30 } };
 
@@ -57,7 +62,7 @@ function paginate<T>(items: T[], page: number, perPage: number) {
 
 export default async function GalleryPage({
   searchParams,
-}: PageProps<"/gallery">) {
+}: PageProps) {
   const locale = await getLocale();
   const [t, common] = await Promise.all([
     getTranslations("gallery"),

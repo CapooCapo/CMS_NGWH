@@ -17,6 +17,10 @@ import {
   newsCategoryLabel,
 } from "@/sanity/queries";
 
+type PageProps = {
+  params: Promise<{ slug: string }>;
+};
+
 const options = { next: { revalidate: 30 } };
 
 /**
@@ -25,7 +29,7 @@ const options = { next: { revalidate: 30 } };
  */
 export async function generateMetadata({
   params,
-}: PageProps<"/news/[slug]">): Promise<Metadata> {
+}: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const locale = await getLocale();
   const article = await client.fetch(
@@ -78,7 +82,7 @@ export async function generateMetadata({
 
 export default async function NewsArticlePage({
   params,
-}: PageProps<"/news/[slug]">) {
+}: PageProps) {
   const { slug } = await params;
   const locale = await getLocale();
   const [t, nav] = await Promise.all([

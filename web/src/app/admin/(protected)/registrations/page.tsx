@@ -12,6 +12,11 @@ import {
   listAdminRegistrations,
 } from "@/server/repositories/registrations";
 import type { RegistrationStatus } from "@/server/repositories/types";
+import type { PageSearchParams } from "@/app/page-props";
+
+type PageProps = {
+  searchParams: PageSearchParams;
+};
 
 export async function generateMetadata(): Promise<Metadata> {
   const [metaT, t] = await Promise.all([
@@ -29,7 +34,7 @@ const STATUSES: readonly RegistrationStatus[] = ["pending", "approved", "rejecte
 /** REQ-REG-001 review queue, with the BR-001 approval action. */
 export default async function AdminRegistrationsPage({
   searchParams,
-}: PageProps<"/admin/registrations">) {
+}: PageProps) {
   const [t, statusT, actionsT, locale] = await Promise.all([
     getTranslations("admin.registrations"),
     getTranslations("admin.status"),

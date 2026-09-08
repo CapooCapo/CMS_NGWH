@@ -1,9 +1,14 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import { Archivo, Be_Vietnam_Pro } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { SITE_NAME, SITE_TAGLINE, siteOrigin } from "@/lib/site";
 import "./globals.css";
+
+type LayoutProps = {
+  children: ReactNode;
+};
 
 /**
  * Two deliberately paired families (see .ai/DESIGN_SYSTEM.md).
@@ -64,7 +69,7 @@ export const metadata: Metadata = {
  * wrap the admin area in the public navigation as well, which is both wrong
  * for an operator mid-task and a waste of the viewport.
  */
-export default async function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps) {
   const locale = await getLocale();
   const messages = await getMessages();
 

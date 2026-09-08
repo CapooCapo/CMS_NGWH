@@ -11,6 +11,10 @@ import { listClubs } from "@/server/repositories/clubs";
 import { findMatchById } from "@/server/repositories/matches";
 import { listMatchStats } from "@/server/repositories/stats";
 
+type PageProps = {
+  params: Promise<{ id: string }>;
+};
+
 export async function generateMetadata(): Promise<Metadata> {
   const [metaT, t] = await Promise.all([
     getTranslations("admin.meta"),
@@ -32,7 +36,7 @@ export async function generateMetadata(): Promise<Metadata> {
  */
 export default async function AdminMatchDetailPage({
   params,
-}: PageProps<"/admin/matches/[id]">) {
+}: PageProps) {
   const [t, metaT, locale] = await Promise.all([
     getTranslations("admin.matchDetail"),
     getTranslations("admin.meta"),

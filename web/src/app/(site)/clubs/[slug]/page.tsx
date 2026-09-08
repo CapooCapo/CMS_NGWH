@@ -18,6 +18,10 @@ import { listPublicClubDocuments } from "@/server/repositories/registrations";
 import type { ClubMember, ClubMemberRole } from "@/server/repositories/types";
 import type { ClubMemberPosition } from "@/lib/clubMembers";
 
+type PageProps = {
+  params: Promise<{ slug: string }>;
+};
+
 /**
  * REQ-CLUB-003..006 — public club profile.
  *
@@ -27,7 +31,7 @@ import type { ClubMemberPosition } from "@/lib/clubMembers";
  */
 export async function generateMetadata({
   params,
-}: PageProps<"/clubs/[slug]">): Promise<Metadata> {
+}: PageProps): Promise<Metadata> {
   const { slug } = await params;
   let club = null;
   try {
@@ -128,7 +132,7 @@ function RosterTable({
 
 export default async function ClubProfilePage({
   params,
-}: PageProps<"/clubs/[slug]">) {
+}: PageProps) {
   const { slug } = await params;
   const locale = await getLocale();
   const [t, nav, myClub] = await Promise.all([

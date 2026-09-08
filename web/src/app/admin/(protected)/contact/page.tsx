@@ -10,6 +10,11 @@ import { formatDateTime } from "@/lib/format";
 import { filterHref, parsePage } from "@/lib/pagination";
 import { listAdminContactMessages } from "@/server/repositories/contact";
 import type { ContactStatus } from "@/server/repositories/types";
+import type { PageSearchParams } from "@/app/page-props";
+
+type PageProps = {
+  searchParams: PageSearchParams;
+};
 
 export async function generateMetadata(): Promise<Metadata> {
   const [metaT, t] = await Promise.all([
@@ -35,7 +40,7 @@ const TONE = { new: "warning", read: "neutral", archived: "muted" } as const;
  */
 export default async function AdminContactPage({
   searchParams,
-}: PageProps<"/admin/contact">) {
+}: PageProps) {
   const [t, statusT, actionsT, locale] = await Promise.all([
     getTranslations("admin.contact"),
     getTranslations("admin.status"),

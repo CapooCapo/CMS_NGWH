@@ -10,6 +10,11 @@ import {
 } from "@/components/ui";
 import { absoluteUrl } from "@/lib/site";
 import { listClubs, listProvinces } from "@/server/repositories/clubs";
+import type { PageSearchParams } from "@/app/page-props";
+
+type PageProps = {
+  searchParams: PageSearchParams;
+};
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("clubs");
@@ -41,7 +46,7 @@ const first = (value: string | string[] | undefined) =>
  * BR-001 is enforced by passing `approvedOnly: true` — pending clubs are never
  * listed here.
  */
-export default async function ClubsPage({ searchParams }: PageProps<"/clubs">) {
+export default async function ClubsPage({ searchParams }: PageProps) {
   const [t, common] = await Promise.all([
     getTranslations("clubs"),
     getTranslations("common"),

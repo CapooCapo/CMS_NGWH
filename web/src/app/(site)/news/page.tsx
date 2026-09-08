@@ -16,6 +16,11 @@ import {
   newsCategoryLabel,
 } from "@/sanity/queries";
 import { DEFAULT_LOCALE, type Locale } from "@/i18n/config";
+import type { PageSearchParams } from "@/app/page-props";
+
+type PageProps = {
+  searchParams: PageSearchParams;
+};
 
 const options = { next: { revalidate: 30 } };
 const PER_PAGE = 9;
@@ -47,7 +52,7 @@ function parsePage(value: string | string[] | undefined): number {
  */
 export default async function NewsIndexPage({
   searchParams,
-}: PageProps<"/news">) {
+}: PageProps) {
   const locale = await getLocale();
   const [t, common] = await Promise.all([
     getTranslations("news"),

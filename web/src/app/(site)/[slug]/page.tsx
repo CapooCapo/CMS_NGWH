@@ -3,6 +3,10 @@ import { getLocale } from "next-intl/server";
 import { client } from "@/sanity/client";
 import { NEWS_ARTICLE_QUERY } from "@/sanity/queries";
 
+type PageProps = {
+  params: Promise<{ slug: string }>;
+};
+
 /**
  * Legacy article URLs.
  *
@@ -14,7 +18,7 @@ import { NEWS_ARTICLE_QUERY } from "@/sanity/queries";
  */
 export default async function LegacyArticleRedirect({
   params,
-}: PageProps<"/[slug]">) {
+}: PageProps) {
   const { slug } = await params;
   const locale = await getLocale();
   const article = await client.fetch(

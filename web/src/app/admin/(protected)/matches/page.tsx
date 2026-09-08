@@ -14,6 +14,11 @@ import { listClubs } from "@/server/repositories/clubs";
 import { listAdminMatches, listLiveMatches } from "@/server/repositories/matches";
 import { listSeasons } from "@/server/repositories/seasons";
 import { currentAdmin } from "@/server/auth/session";
+import type { PageSearchParams } from "@/app/page-props";
+
+type PageProps = {
+  searchParams: PageSearchParams;
+};
 
 export async function generateMetadata(): Promise<Metadata> {
   const [metaT, t] = await Promise.all([
@@ -36,7 +41,7 @@ export async function generateMetadata(): Promise<Metadata> {
  */
 export default async function AdminMatchesPage({
   searchParams,
-}: PageProps<"/admin/matches">) {
+}: PageProps) {
   const [admin, locale, t, statusT, actionsT] = await Promise.all([
     currentAdmin(),
     getLocale(),

@@ -8,6 +8,11 @@ import { Disclosure, JsonForm } from "@/components/admin/JsonForm";
 import { Badge, EmptyState, ErrorState, Table, Td, Th } from "@/components/ui";
 import { parsePage } from "@/lib/pagination";
 import { listAdminSeasons } from "@/server/repositories/seasons";
+import type { PageSearchParams } from "@/app/page-props";
+
+type PageProps = {
+  searchParams: PageSearchParams;
+};
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("admin.seasons");
@@ -21,7 +26,7 @@ export async function generateMetadata(): Promise<Metadata> {
 /** REQ-TOURN-004 — seasons are what the public archive lists. */
 export default async function AdminSeasonsPage({
   searchParams,
-}: PageProps<"/admin/seasons">) {
+}: PageProps) {
   const [t, locale] = await Promise.all([
     getTranslations("admin.seasons"),
     getLocale(),

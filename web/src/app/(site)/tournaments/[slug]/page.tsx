@@ -11,10 +11,14 @@ import { formatDateShort } from "@/lib/format";
 import { absoluteUrl } from "@/lib/site";
 import { findSeasonBySlug, listSeasons } from "@/server/repositories/seasons";
 
+type PageProps = {
+  params: Promise<{ slug: string }>;
+};
+
 /** Dynamic metadata per season (area M). */
 export async function generateMetadata({
   params,
-}: PageProps<"/tournaments/[slug]">): Promise<Metadata> {
+}: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const locale = await getLocale();
   let season = null;
@@ -41,7 +45,7 @@ export async function generateMetadata({
 
 export default async function SeasonPage({
   params,
-}: PageProps<"/tournaments/[slug]">) {
+}: PageProps) {
   const { slug } = await params;
   const locale = await getLocale();
   const t = await getTranslations("tournaments");

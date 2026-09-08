@@ -20,6 +20,11 @@ import {
   canManageUsers,
 } from "@/server/auth/permissions";
 import { redirect } from "next/navigation";
+import type { PageSearchParams } from "@/app/page-props";
+
+type PageProps = {
+  searchParams: PageSearchParams;
+};
 
 export async function generateMetadata(): Promise<Metadata> {
   const [metaT, t] = await Promise.all([
@@ -44,7 +49,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function AdminUsersPage({
   searchParams,
-}: PageProps<"/admin/users">) {
+}: PageProps) {
   const [t, roleT, statusT, actionsT, locale] = await Promise.all([
     getTranslations("admin.users"),
     getTranslations("admin.roles"),
