@@ -10,7 +10,7 @@
     "db:migrate": "node --env-file=.env.local scripts/migrate.mjs",
     "admin:create": "node --env-file=.env.local scripts/create-admin.mjs",
     "owner:create": "node --env-file=.env.local scripts/create-club-owner.mjs",
-    "test": "node --test --env-file-if-exists=.env.local --conditions=react-server --import ./tests/resolve-hook.mjs tests/*.test.ts",
+    "test": "node --import tsx --test --env-file-if-exists=.env.local --conditions=react-server --import ./tests/resolve-hook.mjs tests/*.test.ts",
     "db:seed-demo": "node --env-file=.env.local scripts/seed-demo-db.mjs"
   },
   "dependencies": {
