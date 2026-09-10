@@ -1,5 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
+import { query, pool } from "../src/server/db/pool";
 
 /**
  * Authorization and validation tests against a running dev server.
@@ -13,11 +15,47 @@ import assert from "node:assert/strict";
  * passes without one.
  */
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
-const USER = process.env.TEST_ADMIN_USER ?? "admin";
+const USER = process.env.TEST_ADMIN_USERNAME ?? "admin";
 const PASS = process.env.TEST_ADMIN_PASSWORD ?? "";
+const SETUP_IP = "198.51.100.201";
+const WRONG_PASSWORD_IP = "198.51.100.202";
+const UNKNOWN_USER_IP = "198.51.100.203";
+const UNKNOWN_USER = "api-authorization-unknown-user";
 
 let serverUp = false;
 let cookie: string | null = null;
+let authSetupStatus: number | null = null;
+let authSetupError: string | null = null;
+
+function loginHeaders(ip: string) {
+  return {
+    "Content-Type": "application/json",
+    "X-Forwarded-For": ip,
+  };
+}
+
+function suiteRateLimitKeys() {
+  const secret = process.env.LOGIN_RATE_LIMIT_SECRET;
+  if (!secret?.trim()) return [];
+  const hash = (scope: "account" | "ip", value: string) =>
+    `login-limit:${scope}:${createHmac("sha256", secret)
+      .update(scope === "account" ? value.trim().toLowerCase() : value)
+      .digest("base64url")}`;
+  return [
+    hash("account", USER),
+    hash("account", UNKNOWN_USER),
+    hash("ip", SETUP_IP),
+    hash("ip", WRONG_PASSWORD_IP),
+    hash("ip", UNKNOWN_USER_IP),
+  ];
+}
+
+async function clearSuiteRateLimits() {
+  const keys = suiteRateLimitKeys();
+  if (keys.length) {
+    await query("DELETE FROM login_rate_limits WHERE key_hash = ANY($1::text[])", [keys]);
+  }
+}
 
 before(async () => {
   try {
@@ -31,22 +69,36 @@ before(async () => {
   if (!serverUp) return;
 
   if (PASS) {
+    await clearSuiteRateLimits();
     const response = await fetch(`${BASE}/api/admin/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: loginHeaders(SETUP_IP),
       body: JSON.stringify({ username: USER, password: PASS }),
     });
+    authSetupStatus = response.status;
     const setCookie = response.headers.getSetCookie?.() ?? [];
     const session = setCookie.find((c) => c.startsWith("ngwh_admin_session="));
     if (response.ok && session) cookie = session.split(";")[0];
+    else {
+      authSetupError = `login setup returned ${response.status} without an ngwh_admin_session cookie`;
+    }
   }
 });
 
-after(() => {
-  if (!serverUp) {
-    console.log("      (server not reachable — API tests were skipped)");
-  } else if (!cookie) {
-    console.log("      (no TEST_ADMIN_PASSWORD — authenticated cases were skipped)");
+after(async () => {
+  try {
+    if (!serverUp) {
+      console.log("      (server not reachable — API tests were skipped)");
+    } else if (!PASS) {
+      console.log("      (TEST_ADMIN_PASSWORD is not configured — authenticated cases were skipped)");
+    } else if (!cookie) {
+      console.log(`      (authentication setup failed: ${authSetupError ?? "no session cookie returned"})`);
+    }
+  } finally {
+    if (serverUp && suiteRateLimitKeys().length) {
+      await clearSuiteRateLimits();
+      await pool.end();
+    }
   }
 });
 
@@ -142,10 +194,11 @@ test("admin page routes redirect an unauthenticated visitor to the login page", 
 
 test("login rejects wrong credentials with 401 and sets no cookie", async (t) => {
   if (!serverUp) return t.skip("server not running");
+  await clearSuiteRateLimits();
   const response = await fetch(`${BASE}/api/admin/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: "admin", password: "definitely-wrong" }),
+    headers: loginHeaders(WRONG_PASSWORD_IP),
+    body: JSON.stringify({ username: USER, password: "definitely-wrong" }),
   });
   // PostgreSQL-backed limiter tests run independently. The optional running
   // server may lack the limiter migration or HMAC configuration.
@@ -157,18 +210,17 @@ test("login rejects wrong credentials with 401 and sets no cookie", async (t) =>
 
 test("login does not distinguish an unknown user from a wrong password", async (t) => {
   if (!serverUp) return t.skip("server not running");
-  const [unknown, wrong] = await Promise.all([
-    fetch(`${BASE}/api/admin/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "no-such-user-xyz", password: "whatever123" }),
-    }),
-    fetch(`${BASE}/api/admin/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "admin", password: "whatever123" }),
-    }),
-  ]);
+  await clearSuiteRateLimits();
+  const unknown = await fetch(`${BASE}/api/admin/login`, {
+    method: "POST",
+    headers: loginHeaders(UNKNOWN_USER_IP),
+    body: JSON.stringify({ username: UNKNOWN_USER, password: "whatever123" }),
+  });
+  const wrong = await fetch(`${BASE}/api/admin/login`, {
+    method: "POST",
+    headers: loginHeaders(WRONG_PASSWORD_IP),
+    body: JSON.stringify({ username: USER, password: "whatever123" }),
+  });
   if (unknown.status === 503 && wrong.status === 503) {
     return t.skip("running server has no rate-limit store configured");
   }
@@ -181,7 +233,9 @@ test("an authenticated session can read admin endpoints", async (t) => {
   // Copied to a const so TypeScript narrows it: `cookie` is a mutable
   // module-level binding, so the guard above does not narrow it on its own.
   const sessionCookie = cookie;
-  if (!sessionCookie) return t.skip("no TEST_ADMIN_PASSWORD provided");
+  if (!PASS) return t.skip("TEST_ADMIN_PASSWORD is not configured");
+  assert.equal(authSetupStatus, 200, authSetupError ?? "authentication setup failed");
+  assert.ok(sessionCookie, authSetupError ?? "authentication setup did not return a session cookie");
   for (const path of [
     "/api/admin/me",
     "/api/admin/audit-logs",
@@ -202,7 +256,9 @@ test("an authenticated session can read admin endpoints", async (t) => {
 test("audit history is read-only and rejects unsafe pagination filters", async (t) => {
   if (!serverUp) return t.skip("server not running");
   const sessionCookie = cookie;
-  if (!sessionCookie) return t.skip("no TEST_ADMIN_PASSWORD provided");
+  if (!PASS) return t.skip("TEST_ADMIN_PASSWORD is not configured");
+  assert.equal(authSetupStatus, 200, authSetupError ?? "authentication setup failed");
+  assert.ok(sessionCookie, authSetupError ?? "authentication setup did not return a session cookie");
 
   const limited = await fetch(`${BASE}/api/admin/audit-logs?limit=1`, {
     headers: { Cookie: sessionCookie },

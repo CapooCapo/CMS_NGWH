@@ -46,7 +46,6 @@ export async function PATCH(
   try {
     const body = await readJson(request);
     const v = new Validator(body);
-    v.only(["role", "isActive"]);
 
     /*
      * `role` is optional: this endpoint handles both activation and role

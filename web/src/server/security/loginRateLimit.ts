@@ -70,8 +70,6 @@ async function remaining(client: PoolClient, hashes: string[]): Promise<LoginRat
 }
 
 async function withDatabase<T>(run: (client: PoolClient) => Promise<T>): Promise<T> {
-  // Lazy loading also maps absent DB configuration to an opaque failure.
-  // Importing clientIp alone must not initialise a database pool.
   const { transaction } = await import("@/server/db/pool");
   return transaction(async (client) => {
     await client.query("SET LOCAL statement_timeout = '5s'");
@@ -108,7 +106,6 @@ export async function recordFailedLogin(ip: string | null, account: string): Pro
         [hashes]
       );
       if (rows.length !== keys.length) throw new Error("limiter state missing");
-      // NOW() precedes any lock wait. Use database wall time after row locks.
       const { rows: clock } = await client.query<{ now: Date }>("SELECT clock_timestamp() AS now");
       const now = clock[0].now;
       const active = (expiry: Date | null) => expiry !== null && expiry.getTime() > now.getTime();

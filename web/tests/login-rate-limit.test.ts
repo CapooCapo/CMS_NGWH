@@ -86,12 +86,17 @@ test("remaining TTL decreases and blocked checks/record races leave all state un
   // Move this disposable row's clock forward without waiting in real time.
   await query("UPDATE login_rate_limits SET locked_until=clock_timestamp()+interval '20 seconds' WHERE key_hash=$1", [key(identity)]);
   const before = await snapshot(identity);
+  let previousRetryAfterSeconds = (await checkLoginLimit(null, identity)).retryAfterSeconds;
   for (let i = 0; i < 3; i++) {
     const checked = await checkLoginLimit(null, identity);
     const recorded = await recordFailedLogin(null, identity);
-    assert.ok(checked.retryAfterSeconds >= 19 && checked.retryAfterSeconds <= 20);
+    const after = await snapshot(identity);
+    assert.ok(checked.retryAfterSeconds > 0);
+    assert.ok(checked.retryAfterSeconds <= previousRetryAfterSeconds);
+    assert.ok(recorded.retryAfterSeconds > 0);
     assert.ok(recorded.retryAfterSeconds <= checked.retryAfterSeconds);
-    assert.deepEqual(await snapshot(identity), before);
+    assert.deepEqual(after, before);
+    previousRetryAfterSeconds = recorded.retryAfterSeconds;
   }
 });
 

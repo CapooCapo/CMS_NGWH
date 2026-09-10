@@ -802,6 +802,12 @@ test("an owner cannot self-publish or rename their club's URL", async (t) => {
     }),
   });
   assert.equal(patched.status, 200);
+  const { club: patchedClub } = (await patched.json()) as {
+    club: { slug: string; is_approved: boolean; owner_id: number };
+  };
+  assert.equal(patchedClub.slug, club.slug, "response keeps the server-owned slug");
+  assert.equal(patchedClub.is_approved, club.is_approved, "response keeps publish state");
+  assert.equal(patchedClub.owner_id, account!.id, "response keeps ownership");
 
   const [row] = await query<{ slug: string; is_approved: boolean; owner_id: number }>(
     "SELECT slug, is_approved, owner_id FROM clubs WHERE id = $1",

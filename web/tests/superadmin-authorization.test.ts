@@ -397,6 +397,7 @@ test("an extra body field cannot smuggle a role past the guard", async (t) => {
     }),
   });
   assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), { error: "cannotAssignSuperadmin" });
 
   const list = await fetch(`${BASE}/api/admin/users`, { headers: as("superadmin") });
   const { users } = (await list.json()) as { users: { id: number; role: string }[] };

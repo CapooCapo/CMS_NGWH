@@ -21,7 +21,15 @@ const CREATED = [
   "test-bootstrap-super",
   "test-bootstrap-admin",
   "test-bootstrap-existing",
+  "test-bootstrap-reset",
+  "test-bootstrap-invalid",
+  "test-bootstrap-short",
+  "test-bootstrap-constraint",
 ];
+
+async function deleteTestAdmin(username: string) {
+  await query("DELETE FROM admin_users WHERE username = $1", [username]);
+}
 
 async function createAdmin(env: Record<string, string>, args: string[] = []) {
   return run("node", ["scripts/create-admin.mjs", ...args], {
@@ -41,6 +49,8 @@ after(async () => {
 test("ADMIN_BOOTSTRAP creates a superadmin with a scrypt-hashed password", async () => {
   const username = "test-bootstrap-super";
   const password = "bootstrap-password-2026";
+
+  await deleteTestAdmin(username);
 
   const { stdout } = await createAdmin({
     ADMIN_BOOTSTRAP: username,
@@ -81,6 +91,7 @@ test("ADMIN_BOOTSTRAP creates a superadmin with a scrypt-hashed password", async
 
 test("ADMIN_BOOTSTRAP_ROLE defaults to admin when unset", async () => {
   const username = "test-bootstrap-admin";
+  await deleteTestAdmin(username);
   await createAdmin({
     ADMIN_BOOTSTRAP: username,
     ADMIN_BOOTSTRAP_PASSWORD: "bootstrap-password-2026",
@@ -95,6 +106,7 @@ test("ADMIN_BOOTSTRAP_ROLE defaults to admin when unset", async () => {
 
 test("an invalid bootstrap role is refused and creates nothing", async () => {
   const username = "test-bootstrap-invalid";
+  await deleteTestAdmin(username);
   await assert.rejects(
     () =>
       createAdmin({
@@ -116,10 +128,12 @@ test("an invalid bootstrap role is refused and creates nothing", async () => {
 });
 
 test("a short bootstrap password is refused", async () => {
+  const username = "test-bootstrap-short";
+  await deleteTestAdmin(username);
   await assert.rejects(
     () =>
       createAdmin({
-        ADMIN_BOOTSTRAP: "test-bootstrap-short",
+        ADMIN_BOOTSTRAP: username,
         ADMIN_BOOTSTRAP_PASSWORD: "short",
         ADMIN_BOOTSTRAP_ROLE: "superadmin",
       }),
@@ -135,6 +149,8 @@ test("a short bootstrap password is refused", async () => {
 test("unattended bootstrap is idempotent and never resets a live password", async () => {
   const username = "test-bootstrap-existing";
   const original = "original-password-2026";
+
+  await deleteTestAdmin(username);
 
   await createAdmin({
     ADMIN_BOOTSTRAP: username,
@@ -165,22 +181,34 @@ test("unattended bootstrap is idempotent and never resets a live password", asyn
 });
 
 test("an explicit --username run does reset the password (operator intent)", async () => {
-  const username = "test-bootstrap-existing";
+  const username = "test-bootstrap-reset";
+  const original = "original-password-2026";
   const replacement = "explicitly-reset-2026";
+
+  await deleteTestAdmin(username);
+  await createAdmin({
+    ADMIN_BOOTSTRAP: username,
+    ADMIN_BOOTSTRAP_PASSWORD: original,
+    ADMIN_BOOTSTRAP_ROLE: "admin",
+  });
+
   await createAdmin({ ADMIN_PASSWORD: replacement }, [
     "--username",
     username,
     "--role",
     "superadmin",
   ]);
-  const rows = await query<{ password_hash: string }>(
-    "SELECT password_hash FROM admin_users WHERE username = $1",
+  const rows = await query<{ password_hash: string; role: string }>(
+    "SELECT password_hash, role FROM admin_users WHERE username = $1",
     [username]
   );
   assert.ok(await verifyPassword(replacement, rows[0].password_hash));
+  assert.ok(!(await verifyPassword(original, rows[0].password_hash)));
+  assert.equal(rows[0].role, "superadmin");
 });
 
 test("the database constraint rejects a role outside the known set", async () => {
+  await deleteTestAdmin("test-bootstrap-constraint");
   await assert.rejects(
     () =>
       query(

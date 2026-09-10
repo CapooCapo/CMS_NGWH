@@ -15,8 +15,9 @@ import {
 import { absoluteUrl } from "@/lib/site";
 import { findClubBySlug, listClubMembers } from "@/server/repositories/clubs";
 import { listPublicClubDocuments } from "@/server/repositories/registrations";
-import type { ClubMember, ClubMemberRole } from "@/server/repositories/types";
+import type { ClubMember } from "@/server/repositories/types";
 import type { ClubMemberPosition } from "@/lib/clubMembers";
+import { clubSocialLinks, groupClubMembers, localizedClubAchievements } from "@/lib/clubView";
 
 type PageProps = {
   params: Promise<{ slug: string }>;
@@ -148,18 +149,9 @@ export default async function ClubProfilePage({
     listClubMembers(club.id),
     listPublicClubDocuments(club.id),
   ]);
-  const byRole = (role: ClubMemberRole) =>
-    members.filter((m) => m.member_role === role);
-  const players = byRole("player");
-  const coaches = byRole("coach");
-  const supportStaff = byRole("staff");
-
-  const achievements =
-    locale === "vi"
-      ? club.achievements_vi || club.achievements_en
-      : club.achievements_en || club.achievements_vi;
-
-  const socials = Object.entries(club.social_links ?? {});
+  const { players, coaches, supportStaff } = groupClubMembers(members);
+  const achievements = localizedClubAchievements(club, locale);
+  const socials = clubSocialLinks(club);
   const rosterLabels = {
     number: t("number"),
     name: t("name"),

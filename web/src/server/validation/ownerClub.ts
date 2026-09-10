@@ -30,7 +30,6 @@ export type OwnerClubUpdate = {
 
 export function parseOwnerClub(body: Record<string, unknown>): OwnerClubUpdate {
   const v = new Validator(body);
-  v.only(["name", "province", "foundingYear", "logoUrl", "achievementsEn", "achievementsVi", "contactEmail", "contactPhone", "websiteUrl", "socialLinks"]);
   const input: OwnerClubUpdate = {
     name: v.string("name", { required: true, min: 2, max: 200 }) ?? "",
     province: v.string("province", { required: true, min: 2, max: 160 }) ?? "",

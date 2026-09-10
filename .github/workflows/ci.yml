@@ -12,6 +12,7 @@ permissions:
 jobs:
   web:
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:16-alpine
@@ -33,7 +34,21 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://ngwh_test:ngwh_test@localhost:5432/ngwh_test
+
       LOGIN_RATE_LIMIT_SECRET: ci-only-login-rate-limit-secret
+
+      TEST_ADMIN_USERNAME: biz-admin
+      TEST_ADMIN_PASSWORD: ci-admin-password
+
+      TEST_BIZADMIN_USERNAME: biz-admin
+      TEST_BIZADMIN_PASSWORD: ci-admin-password
+
+      TEST_SUPERADMIN_USERNAME: root-super
+      TEST_SUPERADMIN_PASSWORD: ci-super-password
+
+      TEST_SUBADMIN_USERNAME: read-only
+      TEST_SUBADMIN_PASSWORD: ci-subadmin-password
+
       NEXT_PUBLIC_SANITY_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_SANITY_PROJECT_ID }}
       NEXT_PUBLIC_SANITY_DATASET: ${{ secrets.NEXT_PUBLIC_SANITY_DATASET }}
       MY_MEMORY_KEY: ${{ secrets.MY_MEMORY_KEY }}
@@ -55,12 +70,43 @@ jobs:
       - name: Apply test database migrations
         run: node scripts/migrate.mjs
 
-      - name: Seed test admin
+      - name: Seed superadmin
         env:
-          ADMIN_BOOTSTRAP: ci-admin
-          ADMIN_BOOTSTRAP_PASSWORD: ci-test-only-password
+          ADMIN_BOOTSTRAP: root-super
+          ADMIN_BOOTSTRAP_PASSWORD: ci-super-password
+          ADMIN_BOOTSTRAP_ROLE: superadmin
+        run: node scripts/create-admin.mjs
+
+      - name: Seed admin
+        env:
+          ADMIN_BOOTSTRAP: biz-admin
+          ADMIN_BOOTSTRAP_PASSWORD: ci-admin-password
           ADMIN_BOOTSTRAP_ROLE: admin
         run: node scripts/create-admin.mjs
+
+      - name: Seed subadmin
+        env:
+          ADMIN_BOOTSTRAP: read-only
+          ADMIN_BOOTSTRAP_PASSWORD: ci-subadmin-password
+          ADMIN_BOOTSTRAP_ROLE: subadmin
+        run: node scripts/create-admin.mjs
+
+      - name: Start Next.js test server
+        run: |
+          npm run dev -- --hostname 127.0.0.1 > /tmp/ngwh-next.log 2>&1 &
+          echo $! > /tmp/ngwh-next.pid
+
+      - name: Wait for Next.js server
+        run: |
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:3000/api/live > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          cat /tmp/ngwh-next.log
+          exit 1
 
       - name: Run tests
         run: npm test
@@ -73,3 +119,14 @@ jobs:
 
       - name: Build production application
         run: npm run build
+
+      - name: Show server log on failure
+        if: failure()
+        run: cat /tmp/ngwh-next.log || true
+
+      - name: Stop Next.js server
+        if: always()
+        run: |
+          if [ -f /tmp/ngwh-next.pid ]; then
+            kill "$(cat /tmp/ngwh-next.pid)" || true
+          fi

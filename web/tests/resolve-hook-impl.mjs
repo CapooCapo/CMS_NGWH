@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -6,7 +6,7 @@ const SRC = path.resolve(import.meta.dirname, "..", "src");
 
 /** Adds a `.ts`/`.tsx` extension, or an `/index.ts`, when one exists. */
 function withExtension(absolute) {
-  if (existsSync(absolute) && !absolute.endsWith(path.sep)) return absolute;
+  if (existsSync(absolute) && statSync(absolute).isFile()) return absolute;
   for (const candidate of [
     `${absolute}.ts`,
     `${absolute}.tsx`,

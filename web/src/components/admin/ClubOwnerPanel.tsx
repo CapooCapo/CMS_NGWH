@@ -1,9 +1,7 @@
-"use client";
-
 import { JsonForm } from "@/components/admin/JsonForm";
 import { ToggleButton } from "@/components/admin/ToggleButton";
 import { Badge } from "@/components/ui";
-import { useTranslations } from "next-intl";
+import { getTranslations } from "next-intl/server";
 import type { ClubOwner } from "@/server/repositories/clubOwners";
 
 /**
@@ -16,14 +14,14 @@ import type { ClubOwner } from "@/server/repositories/clubOwners";
  * server-side (`createAndAssignClubOwner`) — this form never gets to say
  * *which* club id the new account is for beyond the one the button is on.
  */
-export function ClubOwnerPanel({
+export async function ClubOwnerPanel({
   clubId,
   owner,
 }: {
   clubId: number;
   owner: ClubOwner | null;
 }) {
-  const t = useTranslations("admin.clubs.owner");
+  const t = await getTranslations("admin.clubs.owner");
 
   if (owner) {
     return (

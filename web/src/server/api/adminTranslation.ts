@@ -17,10 +17,6 @@ export type AdminTranslationHandlerDependencies = {
   translate?: Translate;
 };
 
-/**
- * Handles the privileged translation request. Authorization deliberately runs
- * before body parsing so anonymous callers cannot use validation as an oracle.
- */
 export async function handleAdminTranslation(
   request: Request,
   dependencies: AdminTranslationHandlerDependencies = {}
