@@ -20,6 +20,7 @@
 import { randomBytes, scrypt as scryptCb } from "node:crypto";
 import { promisify } from "node:util";
 import pg from "pg";
+import { databaseConnectionOptions } from "../src/server/db/options.mjs";
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -47,7 +48,7 @@ async function hashPassword(password) {
   return ["scrypt", 16384, 8, 1, salt.toString("base64"), derived.toString("base64")].join("$");
 }
 
-const client = new pg.Client({ connectionString: url });
+const client = new pg.Client(databaseConnectionOptions(url));
 await client.connect();
 
 const CLUBS = [

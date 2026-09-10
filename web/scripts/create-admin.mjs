@@ -25,6 +25,7 @@ import { createInterface } from "node:readline";
 import { randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import pg from "pg";
+import { databaseConnectionOptions } from "../src/server/db/options.mjs";
 
 const scrypt = promisify(scryptCb);
 const N = 16384, R = 8, P = 1, KEYLEN = 64, MAXMEM = 64 * 1024 * 1024;
@@ -109,7 +110,7 @@ if (password.length < 10) {
   process.exit(1);
 }
 
-const client = new pg.Client({ connectionString: url });
+const client = new pg.Client(databaseConnectionOptions(url));
 await client.connect();
 
 /*

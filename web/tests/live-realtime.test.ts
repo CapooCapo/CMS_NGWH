@@ -1,6 +1,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { Client } from "pg";
+import { databaseConnectionOptions } from "../src/server/db/options";
 import { query, pool } from "../src/server/db/pool";
 import { applyLiveMatchUpdate, shouldApplyLiveRevision, type LiveFeed } from "../src/lib/liveFeed";
 import { parseScoreAdjustment } from "../src/server/validation/admin";
@@ -40,7 +41,7 @@ before(async () => {
     [seasonId]
   );
   matchId = match.id;
-  listener = new Client({ connectionString: process.env.DATABASE_URL });
+  listener = new Client(databaseConnectionOptions(process.env.DATABASE_URL!));
   await listener.connect();
   await listener.query(`LISTEN ${LIVE_MATCH_CHANNEL}`);
   // Some managed/pooler endpoints accept LISTEN but do not forward NOTIFY

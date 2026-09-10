@@ -2,6 +2,7 @@
 import {readdir, readFile} from 'node:fs/promises'
 import path from 'node:path'
 import pg from 'pg'
+import {databaseConnectionOptions} from '../src/server/db/options.mjs'
 
 const url = process.env.DATABASE_URL
 if (!url) {
@@ -9,10 +10,7 @@ if (!url) {
   process.exit(1)
 }
 const dir = path.join(process.cwd(), 'src/server/migrations')
-const client = new pg.Client({
-  connectionString: url,
-  ...(process.env.DB_SSL === 'true' ? {ssl: {rejectUnauthorized: true}} : {}),
-})
+const client = new pg.Client(databaseConnectionOptions(url))
 await client.connect()
 await client.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
   name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`)
