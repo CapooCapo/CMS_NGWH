@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { databaseConnectionOptions } from "../src/server/db/options";
 
 const CONNECTION_STRING = "postgresql://user:password@db.example.test/database";
@@ -19,7 +22,27 @@ test("DB_SSL=false explicitly disables PostgreSQL SSL", () => {
   assert.equal(options.ssl, false);
 });
 
-test("DB_SSL=true uses the multiline CA with strict verification", () => {
+test("DB_SSL=true reads the CA file with strict verification", () => {
+  const directory = mkdtempSync(join(tmpdir(), "ngwh-db-ca-"));
+  const file = join(directory, "ca.pem");
+  writeFileSync(file, MULTILINE_CA);
+
+  try {
+    const options = databaseConnectionOptions(CONNECTION_STRING, {
+      DB_SSL: "true",
+      DB_CA_CERT_FILE: file,
+    });
+
+    assert.deepEqual(options.ssl, {
+      rejectUnauthorized: true,
+      ca: MULTILINE_CA,
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("DB_SSL=true uses the inline multiline CA with strict verification", () => {
   const options = databaseConnectionOptions(CONNECTION_STRING, {
     DB_SSL: "true",
     DB_CA_CERT: MULTILINE_CA,
@@ -44,11 +67,22 @@ test("DB_SSL=true normalizes escaped newlines in the CA", () => {
   });
 });
 
-test("DB_SSL=true fails safely when the CA is missing", () => {
-  assert.throws(
-    () => databaseConnectionOptions(CONNECTION_STRING, { DB_SSL: "true" }),
-    /DB_CA_CERT is required when DB_SSL=true/
-  );
+test("DB_SSL=true fails safely when no usable CA file or inline CA is available", () => {
+  const directory = mkdtempSync(join(tmpdir(), "ngwh-db-ca-"));
+  const emptyFile = join(directory, "empty.pem");
+  writeFileSync(emptyFile, "");
+
+  try {
+    assert.throws(
+      () => databaseConnectionOptions(CONNECTION_STRING, {
+        DB_SSL: "true",
+        DB_CA_CERT_FILE: emptyFile,
+      }),
+      /PostgreSQL CA certificate is required when DB_SSL=true/
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("connection-string SSL parameters cannot override the configured CA", () => {
