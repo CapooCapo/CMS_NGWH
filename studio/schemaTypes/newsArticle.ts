@@ -12,7 +12,19 @@ export const newsArticle = defineType({
       hidden: true,
     }),
     defineField({name: 'title', type: 'string', validation: (r) => r.required()}),
-    defineField({name: 'slug', type: 'slug', options: {source: 'title'}, validation: (r) => r.required()}),
+    defineField({
+      name: 'editorialKey',
+      type: 'string',
+      readOnly: true,
+      hidden: true,
+      description: 'Internal source key for safe editorial imports.',
+    }),
+    defineField({
+      name: 'slug',
+      type: 'slug',
+      options: {source: 'title'},
+      validation: (r) => r.required(),
+    }),
     defineField({
       name: 'category',
       type: 'string',

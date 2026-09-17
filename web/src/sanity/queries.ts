@@ -63,7 +63,7 @@ export const galleryCategoryLabel = (
 ) => categoryLabel(GALLERY_CATEGORY_LABELS, locale, category);
 
 export const NEWS_LIST_QUERY = defineQuery(
-  `*[_type == "newsArticle" && language == $language && defined(slug.current)] | order(date desc){ _id, title, slug, category, date, coverImage }`
+  `*[_type == "newsArticle" && language == $language && defined(slug.current) && !(_id match "demo-*")] | order(date desc){ _id, title, slug, category, date, coverImage }`
 );
 
 export const NEWS_ARTICLE_QUERY = defineQuery(
@@ -92,7 +92,7 @@ export const ABOUT_PAGE_QUERY = defineQuery(
 );
 
 export const GALLERY_ITEMS_QUERY = defineQuery(
-  `*[_type == "galleryItem" && language == $language] | order(_createdAt desc){ _id, category, title, photos, body }`
+  `*[_type == "galleryItem" && language == $language && !(_id match "demo-*")] | order(_createdAt desc){ _id, category, title, photos, video, body }`
 );
 
 /**
@@ -108,12 +108,21 @@ export const HOME_PAGE_QUERY = defineQuery(
     missionOverview,
     heroSlides[]{
       _key,
+      editorialKey,
       headline,
       subheadline,
       videoUrl,
       poster,
       ctaLabel,
       ctaHref
+    },
+    featuredVideos[]{
+      _key,
+      title,
+      description,
+      videoUrl,
+      sourceLabel,
+      thumbnail
     },
     championsCorner{
       clubName,
@@ -127,13 +136,13 @@ export const HOME_PAGE_QUERY = defineQuery(
 
 /** REQ-HOME-004 / BR-002 — "Hot News" shows 3 to 5 items. */
 export const HOME_NEWS_QUERY = defineQuery(
-  `*[_type == "newsArticle" && language == $language && defined(slug.current)]
+  `*[_type == "newsArticle" && language == $language && defined(slug.current) && !(_id match "demo-*")]
     | order(date desc)[0...5]{ _id, title, slug, category, date, coverImage }`
 );
 
 /** REQ-HOME-001 / gallery highlights strip on Home. */
 export const HOME_HIGHLIGHTS_QUERY = defineQuery(
-  `*[_type == "galleryItem" && language == $language && count(photos) > 0]
+  `*[_type == "galleryItem" && language == $language && count(photos) > 0 && !(_id match "demo-*")]
     | order(_createdAt desc)[0...6]{ _id, title, category, "photo": photos[0] }`
 );
 

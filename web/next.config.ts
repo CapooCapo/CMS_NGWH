@@ -16,6 +16,7 @@ const nextConfig: NextConfig = {
       "font-src 'self'",
       "style-src 'self' 'unsafe-inline'",
       "script-src 'self' 'unsafe-inline'",
+      "frame-src https://www.youtube-nocookie.com https://player.vimeo.com",
       "connect-src 'self'",
       "upgrade-insecure-requests",
       ...(cspReportUri ? [`report-uri ${cspReportUri}`] : []),

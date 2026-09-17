@@ -32,6 +32,9 @@ export const homePage = defineType({
           type: 'object',
           name: 'heroSlide',
           fields: [
+            // Internal source key for idempotent editorial imports. This is not
+            // visitor-facing content and stays hidden in the Studio.
+            {name: 'editorialKey', type: 'string', readOnly: true, hidden: true},
             {name: 'headline', type: 'string', title: 'Headline'},
             {name: 'subheadline', type: 'text', rows: 2, title: 'Sub-headline'},
             {
@@ -63,6 +66,15 @@ export const homePage = defineType({
       ],
     }),
 
+    defineField({
+      name: 'featuredVideos',
+      title: 'Featured videos',
+      description:
+        'Provider-hosted basketball video for the public Home page. Use a poster image so the player only loads after a visitor chooses to watch.',
+      type: 'array',
+      of: [defineArrayMember({type: 'mediaHighlight'})],
+    }),
+
     // REQ-HOME-002 — tagline in the hero. Defaults to the brand tagline
     // (REQ-BRAND-003) in the frontend when left blank.
     defineField({
@@ -90,7 +102,7 @@ export const homePage = defineType({
     // REQ-HOME-006 — Champions Corner (defending champion).
     defineField({
       name: 'championsCorner',
-      title: "Champions Corner",
+      title: 'Champions Corner',
       description: 'REQ-HOME-006 — the defending champion.',
       type: 'object',
       fields: [

@@ -106,7 +106,10 @@
     "liveResultsEyebrow": "Bảng điểm",
     "championsEyebrow": "Ngôi đền vô địch",
     "missionEyebrow": "Chúng tôi là ai",
-    "moreHeadlines": "Tin khác"
+    "moreHeadlines": "Tin khác",
+    "videos": "Xem cùng trận đấu",
+    "videosEyebrow": "Từ phòng phân tích",
+    "playVideo": "Phát video"
   },
   "news": {
     "title": "Tin tức",
@@ -149,7 +152,9 @@
     "imageCounter": "Ảnh {index} / {total}",
     "previousImage": "Ảnh trước",
     "nextImage": "Ảnh sau",
-    "eyebrow": "Khoảnh khắc vô địch"
+    "eyebrow": "Khoảnh khắc vô địch",
+    "featuredVideos": "Xem khoảnh khắc nổi bật",
+    "playVideo": "Phát video"
   },
   "tournaments": {
     "title": "Giải đấu",

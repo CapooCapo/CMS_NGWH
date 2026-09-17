@@ -106,7 +106,10 @@
     "liveResultsEyebrow": "Scoreboard",
     "championsEyebrow": "Hall of champions",
     "missionEyebrow": "Who we are",
-    "moreHeadlines": "More headlines"
+    "moreHeadlines": "More headlines",
+    "videos": "Watch the game",
+    "videosEyebrow": "From the film room",
+    "playVideo": "Play video"
   },
   "news": {
     "title": "News",
@@ -149,7 +152,9 @@
     "imageCounter": "Image {index} of {total}",
     "previousImage": "Previous image",
     "nextImage": "Next image",
-    "eyebrow": "Championship moments"
+    "eyebrow": "Championship moments",
+    "featuredVideos": "Watch the highlights",
+    "playVideo": "Play video"
   },
   "tournaments": {
     "title": "Tournaments",

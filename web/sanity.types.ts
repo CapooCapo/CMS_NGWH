@@ -140,6 +140,7 @@ export type HomePage = {
   _rev: string;
   language?: string;
   heroSlides?: Array<{
+    editorialKey?: string;
     headline?: string;
     subheadline?: string;
     videoUrl?: string;
@@ -156,6 +157,11 @@ export type HomePage = {
     _type: "heroSlide";
     _key: string;
   }>;
+  featuredVideos?: Array<
+    {
+      _key: string;
+    } & MediaHighlight
+  >;
   tagline?: string;
   missionTitle?: string;
   missionOverview?: BlockContent;
@@ -172,6 +178,23 @@ export type HomePage = {
       _type: "image";
     };
     clubSlug?: string;
+  };
+};
+
+export type MediaHighlight = {
+  _type: "mediaHighlight";
+  editorialKey?: string;
+  title?: string;
+  description?: string;
+  videoUrl?: string;
+  sourceLabel?: string;
+  thumbnail?: {
+    asset?: SanityImageAssetReference;
+    media?: unknown;
+    hotspot?: SanityImageHotspot;
+    crop?: SanityImageCrop;
+    alt?: string;
+    _type: "image";
   };
 };
 
@@ -220,6 +243,7 @@ export type GalleryItem = {
   language?: string;
   category?: "hall-of-glory" | "mvp-spotlight" | "behind-the-scenes";
   title?: string;
+  editorialKey?: string;
   photos?: Array<{
     asset?: SanityImageAssetReference;
     media?: unknown;
@@ -229,6 +253,7 @@ export type GalleryItem = {
     _type: "image";
     _key: string;
   }>;
+  video?: MediaHighlight;
   body?: BlockContent;
 };
 
@@ -240,6 +265,7 @@ export type NewsArticle = {
   _rev: string;
   language?: string;
   title?: string;
+  editorialKey?: string;
   slug?: Slug;
   category?:
     "tournament-news" | "inspirational-stories" | "knowledge-nutrition";
@@ -368,6 +394,7 @@ export type AllSanitySchemaTypes =
   | PartnerReference
   | AboutPage
   | HomePage
+  | MediaHighlight
   | TranslationMetadata
   | InternationalizedArrayReference
   | NewsArticleReference
@@ -387,7 +414,7 @@ export type AllSanitySchemaTypes =
 
 // Source: ../web/src/sanity/queries.ts
 // Variable: NEWS_LIST_QUERY
-// Query: *[_type == "newsArticle" && language == $language && defined(slug.current)] | order(date desc){ _id, title, slug, category, date, coverImage }
+// Query: *[_type == "newsArticle" && language == $language && defined(slug.current) && !(_id match "demo-*")] | order(date desc){ _id, title, slug, category, date, coverImage }
 export type NEWS_LIST_QUERY_RESULT = Array<{
   _id: string;
   title: string | null;
@@ -459,7 +486,7 @@ export type ABOUT_PAGE_QUERY_RESULT = {
 
 // Source: ../web/src/sanity/queries.ts
 // Variable: GALLERY_ITEMS_QUERY
-// Query: *[_type == "galleryItem" && language == $language] | order(_createdAt desc){ _id, category, title, photos, body }
+// Query: *[_type == "galleryItem" && language == $language && !(_id match "demo-*")] | order(_createdAt desc){ _id, category, title, photos, video, body }
 export type GALLERY_ITEMS_QUERY_RESULT = Array<{
   _id: string;
   category: "behind-the-scenes" | "hall-of-glory" | "mvp-spotlight" | null;
@@ -473,18 +500,20 @@ export type GALLERY_ITEMS_QUERY_RESULT = Array<{
     _type: "image";
     _key: string;
   }> | null;
+  video: MediaHighlight | null;
   body: BlockContent | null;
 }>;
 
 // Source: ../web/src/sanity/queries.ts
 // Variable: HOME_PAGE_QUERY
-// Query: *[_type == "homePage" && language == $language][0]{    tagline,    missionTitle,    missionOverview,    heroSlides[]{      _key,      headline,      subheadline,      videoUrl,      poster,      ctaLabel,      ctaHref    },    championsCorner{      clubName,      seasonLabel,      summary,      image,      clubSlug    }  }
+// Query: *[_type == "homePage" && language == $language][0]{    tagline,    missionTitle,    missionOverview,    heroSlides[]{      _key,      editorialKey,      headline,      subheadline,      videoUrl,      poster,      ctaLabel,      ctaHref    },    featuredVideos[]{      _key,      title,      description,      videoUrl,      sourceLabel,      thumbnail    },    championsCorner{      clubName,      seasonLabel,      summary,      image,      clubSlug    }  }
 export type HOME_PAGE_QUERY_RESULT = {
   tagline: string | null;
   missionTitle: string | null;
   missionOverview: BlockContent | null;
   heroSlides: Array<{
     _key: string;
+    editorialKey: string | null;
     headline: string | null;
     subheadline: string | null;
     videoUrl: string | null;
@@ -498,6 +527,21 @@ export type HOME_PAGE_QUERY_RESULT = {
     } | null;
     ctaLabel: string | null;
     ctaHref: string | null;
+  }> | null;
+  featuredVideos: Array<{
+    _key: string;
+    title: string | null;
+    description: string | null;
+    videoUrl: string | null;
+    sourceLabel: string | null;
+    thumbnail: {
+      asset?: SanityImageAssetReference;
+      media?: unknown;
+      hotspot?: SanityImageHotspot;
+      crop?: SanityImageCrop;
+      alt?: string;
+      _type: "image";
+    } | null;
   }> | null;
   championsCorner: {
     clubName: string | null;
@@ -517,7 +561,7 @@ export type HOME_PAGE_QUERY_RESULT = {
 
 // Source: ../web/src/sanity/queries.ts
 // Variable: HOME_NEWS_QUERY
-// Query: *[_type == "newsArticle" && language == $language && defined(slug.current)]    | order(date desc)[0...5]{ _id, title, slug, category, date, coverImage }
+// Query: *[_type == "newsArticle" && language == $language && defined(slug.current) && !(_id match "demo-*")]    | order(date desc)[0...5]{ _id, title, slug, category, date, coverImage }
 export type HOME_NEWS_QUERY_RESULT = Array<{
   _id: string;
   title: string | null;
@@ -537,7 +581,7 @@ export type HOME_NEWS_QUERY_RESULT = Array<{
 
 // Source: ../web/src/sanity/queries.ts
 // Variable: HOME_HIGHLIGHTS_QUERY
-// Query: *[_type == "galleryItem" && language == $language && count(photos) > 0]    | order(_createdAt desc)[0...6]{ _id, title, category, "photo": photos[0] }
+// Query: *[_type == "galleryItem" && language == $language && count(photos) > 0 && !(_id match "demo-*")]    | order(_createdAt desc)[0...6]{ _id, title, category, "photo": photos[0] }
 export type HOME_HIGHLIGHTS_QUERY_RESULT = Array<{
   _id: string;
   title: string | null;
@@ -609,13 +653,13 @@ export type NEWS_TRANSLATIONS_QUERY_RESULT = Array<{
 import "@sanity/client";
 declare module "@sanity/client" {
   interface SanityQueries {
-    '*[_type == "newsArticle" && language == $language && defined(slug.current)] | order(date desc){ _id, title, slug, category, date, coverImage }': NEWS_LIST_QUERY_RESULT;
+    '*[_type == "newsArticle" && language == $language && defined(slug.current) && !(_id match "demo-*")] | order(date desc){ _id, title, slug, category, date, coverImage }': NEWS_LIST_QUERY_RESULT;
     '*[_type == "newsArticle" && language == $language && slug.current == $slug][0]{ _id, title, category, date, coverImage, body }': NEWS_ARTICLE_QUERY_RESULT;
     '*[_type == "aboutPage" && language == $language][0]{\n    brandStory,\n    vision,\n    mission,\n    tournamentSystem,\n    organizerAndPartners,\n    images,\n    partners[]-> {\n      _id,\n      name,\n      "role": coalesce(select($language == "vi" => roleVi), roleEn, role),\n      logo\n    }\n  }': ABOUT_PAGE_QUERY_RESULT;
-    '*[_type == "galleryItem" && language == $language] | order(_createdAt desc){ _id, category, title, photos, body }': GALLERY_ITEMS_QUERY_RESULT;
-    '*[_type == "homePage" && language == $language][0]{\n    tagline,\n    missionTitle,\n    missionOverview,\n    heroSlides[]{\n      _key,\n      headline,\n      subheadline,\n      videoUrl,\n      poster,\n      ctaLabel,\n      ctaHref\n    },\n    championsCorner{\n      clubName,\n      seasonLabel,\n      summary,\n      image,\n      clubSlug\n    }\n  }': HOME_PAGE_QUERY_RESULT;
-    '*[_type == "newsArticle" && language == $language && defined(slug.current)]\n    | order(date desc)[0...5]{ _id, title, slug, category, date, coverImage }': HOME_NEWS_QUERY_RESULT;
-    '*[_type == "galleryItem" && language == $language && count(photos) > 0]\n    | order(_createdAt desc)[0...6]{ _id, title, category, "photo": photos[0] }': HOME_HIGHLIGHTS_QUERY_RESULT;
+    '*[_type == "galleryItem" && language == $language && !(_id match "demo-*")] | order(_createdAt desc){ _id, category, title, photos, video, body }': GALLERY_ITEMS_QUERY_RESULT;
+    '*[_type == "homePage" && language == $language][0]{\n    tagline,\n    missionTitle,\n    missionOverview,\n    heroSlides[]{\n      _key,\n      editorialKey,\n      headline,\n      subheadline,\n      videoUrl,\n      poster,\n      ctaLabel,\n      ctaHref\n    },\n    featuredVideos[]{\n      _key,\n      title,\n      description,\n      videoUrl,\n      sourceLabel,\n      thumbnail\n    },\n    championsCorner{\n      clubName,\n      seasonLabel,\n      summary,\n      image,\n      clubSlug\n    }\n  }': HOME_PAGE_QUERY_RESULT;
+    '*[_type == "newsArticle" && language == $language && defined(slug.current) && !(_id match "demo-*")]\n    | order(date desc)[0...5]{ _id, title, slug, category, date, coverImage }': HOME_NEWS_QUERY_RESULT;
+    '*[_type == "galleryItem" && language == $language && count(photos) > 0 && !(_id match "demo-*")]\n    | order(_createdAt desc)[0...6]{ _id, title, category, "photo": photos[0] }': HOME_HIGHLIGHTS_QUERY_RESULT;
     '*[_type == "contactPage" && language == $language][0]{\n    officeName,\n    address,\n    hotline,\n    emails[]{ label, address },\n    officeHours,\n    note,\n    formIntro\n  }': CONTACT_PAGE_QUERY_RESULT;
     '*[_type == "newsArticle" && language == $language && defined(slug.current)\n      && slug.current != $slug]\n    | order(date desc)[0...3]{ _id, title, slug, category, date, coverImage }': NEWS_RELATED_QUERY_RESULT;
     '*[_type == "newsArticle" && defined(slug.current)]{\n    "slug": slug.current,\n    "updatedAt": _updatedAt\n  }': NEWS_SITEMAP_QUERY_RESULT;

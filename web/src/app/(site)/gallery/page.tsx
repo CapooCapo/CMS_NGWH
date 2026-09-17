@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import { getLocale, getTranslations } from "next-intl/server";
 import { GalleryGrid, type GalleryPhoto } from "@/components/gallery/GalleryGrid";
+import { VideoEmbed } from "@/components/media/VideoEmbed";
 import { PaginationControl } from "@/components/PaginationControl";
 import { PortableTextBody } from "@/components/PortableTextBody";
 import {
@@ -98,6 +99,9 @@ export default async function GalleryPage({
 
   const hallOfGloryPhotos = flatten(hallOfGlory);
   const behindTheScenesPhotos = flatten(behindTheScenes);
+  const hallVideos = hallOfGlory.flatMap((item) =>
+    item.video?.videoUrl ? [{...item.video, key: item._id}] : []
+  );
 
   const hogPagination = paginate(
     hallOfGloryPhotos,
@@ -159,6 +163,30 @@ export default async function GalleryPage({
                 columns="three"
                 priority
               />
+              {hallVideos.length > 0 && (
+                <div className="mt-8">
+                  <h3 className="mb-4 text-[length:var(--text-xl)] font-extrabold leading-tight">
+                    {t("featuredVideos")}
+                  </h3>
+                  <div className="grid gap-5 md:grid-cols-2 md:gap-6">
+                    {hallVideos.map((video) => {
+                      const thumbnail = video.thumbnail;
+                      return (
+                        <VideoEmbed
+                          key={video.key}
+                          title={video.title ?? ""}
+                          description={video.description}
+                          sourceLabel={video.sourceLabel}
+                          thumbnailUrl={thumbnail ? urlForImage(thumbnail as never).width(960).height(540).fit("crop").url() : null}
+                          thumbnailAlt={(thumbnail as {alt?: string} | undefined)?.alt ?? video.title}
+                          videoUrl={video.videoUrl ?? ""}
+                          playLabel={t("playVideo")}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <PaginationControl
                 basePath="/gallery"
                 paramName="hogPage"

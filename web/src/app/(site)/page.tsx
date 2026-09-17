@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { getLocale, getTranslations } from "next-intl/server";
 import { HeroCarousel, type HeroSlide } from "@/components/home/HeroCarousel";
 import { LiveResults } from "@/components/home/LiveResults";
+import { VideoEmbed } from "@/components/media/VideoEmbed";
 import { NewsCard } from "@/components/news/NewsCard";
 import { NewsListItem } from "@/components/news/NewsListItem";
 import { PortableTextBody } from "@/components/PortableTextBody";
@@ -224,6 +225,36 @@ export default async function HomePage() {
             </div>
           </Container>
         </section>
+      )}
+
+      {Array.isArray(home?.featuredVideos) && home.featuredVideos.length > 0 && (
+        <Container className="pt-12 sm:pt-16">
+          <section aria-labelledby="featured-videos">
+            <SectionHeading id="featured-videos" eyebrow={t("videosEyebrow")}>
+              {t("videos")}
+            </SectionHeading>
+            <div className="grid gap-5 md:grid-cols-2 md:gap-6">
+              {home.featuredVideos.map((video, index) => {
+                const thumbnail = video.thumbnail;
+                const thumbnailUrl = thumbnail
+                  ? urlForImage(thumbnail as never).width(960).height(540).fit("crop").url()
+                  : null;
+                return (
+                  <VideoEmbed
+                    key={video._key ?? index}
+                    title={video.title ?? ""}
+                    description={video.description}
+                    sourceLabel={video.sourceLabel}
+                    thumbnailUrl={thumbnailUrl}
+                    thumbnailAlt={(thumbnail as { alt?: string } | undefined)?.alt ?? video.title}
+                    videoUrl={video.videoUrl ?? ""}
+                    playLabel={t("playVideo")}
+                  />
+                );
+              })}
+            </div>
+          </section>
+        </Container>
       )}
 
       {/* REQ-HOME-003 — short mission overview. */}

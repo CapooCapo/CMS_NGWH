@@ -25,6 +25,13 @@ export const galleryItem = defineType({
     }),
     defineField({name: 'title', type: 'string', validation: (r) => r.required()}),
     defineField({
+      name: 'editorialKey',
+      type: 'string',
+      readOnly: true,
+      hidden: true,
+      description: 'Internal source key for safe editorial imports.',
+    }),
+    defineField({
       name: 'photos',
       title: 'Photos',
       type: 'array',
@@ -35,6 +42,12 @@ export const galleryItem = defineType({
           fields: [{name: 'alt', type: 'string', title: 'Alternative text'}],
         }),
       ],
+    }),
+    defineField({
+      name: 'video',
+      title: 'Related video',
+      description: 'Optional streamed highlight shown alongside this gallery story.',
+      type: 'mediaHighlight',
     }),
     defineField({name: 'body', type: 'blockContent'}),
   ],

@@ -76,11 +76,16 @@ export default async function AboutPage() {
         lead={t("metaDescription")}
       />
 
-      <Container width="prose" className="flex flex-col gap-12 py-10 sm:py-12">
+      <Container className="flex flex-col gap-12 py-10 sm:gap-16 sm:py-14 lg:py-16">
         {Array.isArray(about.brandStory) && about.brandStory.length > 0 && (
-          <section aria-labelledby="brand-story">
-            <SectionHeading id="brand-story">{t("brandStory")}</SectionHeading>
-            <div className="text-[length:var(--text-lg)] leading-[1.75]">
+          <section
+            aria-labelledby="brand-story"
+            className="grid gap-5 lg:grid-cols-12 lg:gap-x-12"
+          >
+            <div className="lg:col-span-4">
+              <SectionHeading id="brand-story">{t("brandStory")}</SectionHeading>
+            </div>
+            <div className="max-w-[76ch] text-[length:var(--text-lg)] leading-[1.75] lg:col-span-8">
               <PortableTextBody value={about.brandStory} />
             </div>
           </section>
@@ -118,18 +123,20 @@ export default async function AboutPage() {
           </div>
         )}
 
-        {proseSections.map(
-          (section) =>
-            Array.isArray(section.value) &&
-            section.value.length > 0 && (
-              <section key={section.id} aria-labelledby={section.id}>
-                <SectionHeading id={section.id}>{section.heading}</SectionHeading>
-                <div className="text-[length:var(--text-base)] leading-relaxed">
-                  <PortableTextBody value={section.value} />
-                </div>
-              </section>
-            )
-        )}
+        <div className="grid gap-12 lg:grid-cols-2 lg:gap-x-12 lg:gap-y-16">
+          {proseSections.map(
+            (section) =>
+              Array.isArray(section.value) &&
+              section.value.length > 0 && (
+                <section key={section.id} aria-labelledby={section.id}>
+                  <SectionHeading id={section.id}>{section.heading}</SectionHeading>
+                  <div className="max-w-[68ch] text-[length:var(--text-base)] leading-relaxed">
+                    <PortableTextBody value={section.value} />
+                  </div>
+                </section>
+              )
+          )}
+        </div>
       </Container>
 
       {Array.isArray(about.images) && about.images.length > 0 && (
